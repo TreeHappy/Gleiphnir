@@ -1,0 +1,30 @@
+{
+    "name": "Gleiphnir Codespaces",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "..",
+        "args": {
+            "VARIANT": "26.04"
+        }
+    },
+    "remoteUser": "taminaru",
+    "containerEnv": {
+        "USER": "taminaru"
+    },
+    "features": {
+        "ghcr.io/devcontainers/features/sshd:1": {}
+    },
+    "forwardPorts": [
+        2222
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "workbench.colorTheme": "Catppuccin Frappé"
+            },
+            "extensions": [
+                "Catppuccin.catppuccin-vsc"
+            ]
+        }
+    }
+}
