@@ -1,8 +1,6 @@
 {
     "name": "Gleiphnir Codespaces",
-    "build": {
-        "image": "mcr.microsoft.com/devcontainers/base:ubuntu-26.04"
-    },
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-26.04",
     "remoteUser": "taminaru",
     "containerEnv": {
         "USER": "taminaru"
