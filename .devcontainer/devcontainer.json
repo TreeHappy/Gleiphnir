@@ -1,10 +1,12 @@
 {
     "name": "Gleiphnir Codespaces",
-    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-26.04",
-    "remoteUser": "taminaru",
-    "containerEnv": {
-        "USER": "taminaru"
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "VARIANT": "26.04"
+        }
     },
+    "remoteUser": "taminaru",
     "features": {
         "ghcr.io/devcontainers/features/sshd:1": {},
         "ghcr.io/devcontainers-extra/features/mise:1": {}
