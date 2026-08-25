@@ -230,4 +230,4 @@ container/
 
 ## License
 
-See `LICENSE`.
+Apache-2.0 — see [`LICENSE`](LICENSE). Copyright 2026 TreeHappy.
