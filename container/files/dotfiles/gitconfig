@@ -1,0 +1,22 @@
+# /etc/sandbox/dotfiles/gitconfig — linked to ~/.gitconfig in the sandbox
+[core]
+	pager = delta
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	side-by-side = false
+
+[diff]
+	colorMoved = default
+
+[merge]
+	conflictstyle = diff3
+
+# hunk — review-first diff viewer (opt-in aliases so plain `git diff` stays delta)
+[alias]
+	hdiff = "!f() { git -c core.pager=\"hunk pager\" diff \"$@\"; }; f"
+	hshow = "!f() { git -c core.pager=\"hunk pager\" show \"$@\"; }; f"

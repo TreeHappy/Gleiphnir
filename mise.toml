@@ -1,15 +1,160 @@
-# mise — host tooling for Gleiphnir
-# Install with: mise install  (or: curl https://mise.run | sh)
-# These are convenience tools for the host side; the QEMU VM and sandbox
-# container have their own installs via apt/cloud-init and container mise.
+# mise — Gleiphnir host tooling + task runner
+# Requires: mise (https://mise.run) and pwsh 7+ (PowerShell) on PATH.
+# All orchestration lives here; the old Taskfile.yml was removed.
+# Run `mise tasks ls` to list, `mise run <task>` to execute.
 
 [tools]
-# Taskfile runner (portable Make alternative)
-task = "latest"
-# Go-task's upstream is often listed as "task" in the mise registry;
-# if `mise install` fails to resolve `task`, use `aqua:go-task/task` instead:
-# "aqua:go-task/task" = "latest"
+# mise itself is the only hard host requirement (plus pwsh + qemu, checked by `mise run deps`)
 
 [settings]
 experimental = true
 not_found_auto_install = true
+
+[env]
+# Shared tunables — consumed by vm/scripts/*.ps1 via lib.ps1
+_.file = "{{ config_root }}/config/sandbox.env"
+
+# ── default ────────────────────────────────────────────────────────────────
+[tasks.default]
+description = "Show available tasks"
+run = "mise tasks ls"
+
+# ── tooling ────────────────────────────────────────────────────────────────
+[tasks.deps]
+description = "Check host dependencies (qemu, python/pycdlib, mise, pwsh)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/deps.ps1'"
+
+[tasks.'gen:key']
+description = "Generate admin SSH keypair if missing"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/gen-key.ps1'"
+
+# ── image ──────────────────────────────────────────────────────────────────
+[tasks.'image:download']
+description = "Download Ubuntu cloud image (qcow2)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/download-image.ps1'"
+
+[tasks.'image:info']
+description = "Show downloaded image info"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/image-info.ps1'"
+
+# ── networking ─────────────────────────────────────────────────────────────
+[tasks.'network:up']
+description = "Create bridge + TAP (Linux hosts, requires sudo)"
+run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% else %}sudo -E pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% endif %}"
+
+[tasks.'network:down']
+description = "Remove bridge + TAP (Linux hosts, requires sudo)"
+run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% else %}sudo -E pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% endif %}"
+
+[tasks.'network:status']
+description = "Show bridge/TAP/iptables status"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-status.ps1'"
+
+# ── VM lifecycle ───────────────────────────────────────────────────────────
+[tasks.'vm:prepare']
+description = "Build seed ISO and data disk from cloud-init templates"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/prepare-vm.ps1'"
+
+[tasks.'vm:start']
+description = "Start the VM (creates bridge if needed on Linux, then launches QEMU)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/start-vm.ps1'"
+
+[tasks.'vm:stop']
+description = "Stop the VM gracefully (QEMU monitor quit)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/stop-vm.ps1'"
+
+[tasks.'vm:kill']
+description = "Force-kill QEMU if vm:stop hangs"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/kill-vm.ps1'"
+
+[tasks.'vm:console']
+description = "Attach to VM serial console log (exit with Ctrl-C)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/console.ps1'"
+
+[tasks.'vm:ssh']
+description = "SSH as admin (forwards to VM via bridge or hostfwd)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/ssh-admin.ps1'"
+
+[tasks.'vm:ssh:wait']
+description = "Wait until VM SSH is reachable (polls)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/wait-ssh.ps1'"
+
+[tasks.'vm:info']
+description = "Show VM status, PID, network mode, disks"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/vm-info.ps1'"
+
+[tasks.'vm:clean']
+description = "Remove generated disks and seed ISO (keeps base cloud image)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/clean-vm.ps1'"
+
+[tasks.'vm:clean:all']
+description = "Remove everything including base cloud image"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/clean-vm.ps1' -All"
+
+# ── sandbox user management (proxies to VM via SSH) ───────────────────────
+[tasks.'user:add']
+description = "Create a sandbox user: mise run user:add USER=alice [KEY=~/.ssh/id_ed25519.pub]"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-user.ps1' add"
+
+[tasks.'user:remove']
+description = "Remove a sandbox user: mise run user:remove USER=alice"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-user.ps1' remove"
+
+[tasks.'user:list']
+description = "List sandbox users (proxies to VM)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-user.ps1' list"
+
+# ── firewall (proxies to guest ufw) ───────────────────────────────────────
+[tasks.'fw:allow']
+description = "Allow an IP to SSH to the VM: mise run fw:allow IP=1.2.3.4"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' allow"
+
+[tasks.'fw:deny']
+description = "Block an IP at the VM firewall: mise run fw:deny IP=1.2.3.4"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' deny"
+
+[tasks.'fw:remove']
+description = "Remove an IP from allow/deny rules: mise run fw:remove IP=1.2.3.4"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' remove"
+
+[tasks.'fw:list']
+description = "List ufw rules in the VM"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' list"
+
+[tasks.'fw:enforce']
+description = "Lock down SSH to allow-listed IPs only (removes bootstrap open rule)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' enforce"
+
+# ── container ──────────────────────────────────────────────────────────────
+[tasks.'container:build']
+description = "Build the sandbox container image inside the running VM"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-build.ps1'"
+
+[tasks.'container:info']
+description = "Show container image info from inside the VM"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-info.ps1'"
+
+# ── verification ───────────────────────────────────────────────────────────
+[tasks.smoke]
+description = "Quick smoke test (requires running VM)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/smoke-test.ps1'"
+
+# ── convenience ────────────────────────────────────────────────────────────
+[tasks.up]
+description = "Full bring-up — deps check, download image, prepare, start, wait for SSH"
+run = """
+set -e
+mise run deps
+mise run image:download
+mise run vm:prepare
+mise run vm:start
+mise run vm:ssh:wait
+"""
+
+[tasks.down]
+description = "Stop VM and tear down bridge/TAP"
+run = """
+set -e
+mise run vm:stop
+mise run network:down
+"""

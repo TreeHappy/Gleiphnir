@@ -1,19 +1,67 @@
 # /etc/sandbox/mise.toml — default tool manifest for Gleiphnir sandboxes
-# Installed lazily into /work/.mise/data on first container start.
-# Users can override/extend by placing their own mise.toml in /work.
+# Installed lazily into the SHARED mise volume (sandbox-mise → /opt/mise-shared)
+# on first container start / at build-container warm-up. Downloaded once for all
+# sandbox users. Users can override/extend by placing their own mise.toml in /work.
+
 [tools]
-# CLI essentials (via aqua/ubi backends — mise resolves these automatically)
+# CLI essentials
 ripgrep = "latest"
 fd = "latest"
 fzf = "latest"
 # gh is provided as `gh` via aqua:cli/cli internally
 "aqua:cli/cli" = "latest"
+delta = "latest"        # git-diff pager
+hunk = "latest"         # review-first terminal diff viewer (modem-dev/hunk)
+yazi = "latest"         # file manager TUI
+leaf = "github:RivoLink/leaf"  # markdown reader (fallback: npm:@rivolink/leaf)
+carapace = "latest"     # multi-shell completions
+atuin = "latest"        # shell history
+
+# Editors / shells / agents
+neovim = "latest"
+pwsh = "latest"         # default sandbox shell
+opencode = "latest"     # AI coding agent
+
 # Language runtimes
 node = "lts"
 python = "3.12"
 golang = "latest"
+dotnet = "latest"
+
+[env]
+EDITOR   = "nvim"
+VISUAL   = "nvim"
+PAGER    = "less"
+MANPAGER = "nvim +Man!"
+LANG     = "C.UTF-8"
 
 [settings]
 experimental = true
 not_found_auto_install = true
 jobs = 4
+
+# ── dotfiles ────────────────────────────────────────────────────────────────
+# Ships the sandbox shell configs into $HOME. Idempotent; re-run any time.
+# Personal override: drop same-named files into /work/dotfiles/ — they win.
+[tasks.dotfiles]
+description = "Link sandbox dotfiles into $HOME (bashrc, pwsh profile, gitconfig)"
+run = '''
+set -e
+SRC="/etc/sandbox/dotfiles"
+mkdir -p "$HOME/.config/powershell"
+
+link() {  # link <source> <target>
+  local base target="$2"
+  base="$(basename "$1")"
+  if [ -f "/work/dotfiles/$base" ]; then
+    ln -sfn "/work/dotfiles/$base" "$target"
+  else
+    ln -sfn "$1" "$target"
+  fi
+}
+
+link "$SRC/bashrc"      "$HOME/.bashrc"
+link "$SRC/profile.ps1" "$HOME/.config/powershell/profile.ps1"
+link "$SRC/gitconfig"   "$HOME/.gitconfig"
+echo "[sandbox] dotfiles linked."
+'''

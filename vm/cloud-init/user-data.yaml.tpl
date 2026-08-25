@@ -13,7 +13,7 @@ users:
 package_update: true
 packages:
   - podman
-  - nftables
+  - ufw
   - uidmap
   - slirp4netns
   - fuse-overlayfs
@@ -24,7 +24,6 @@ packages:
   - curl
   - unzip
   - git
-  - socat
 
 # ── storage: dedicated data disk at /srv/sandbox ──────────────────────────
 disk_setup:
@@ -43,12 +42,6 @@ mounts:
   - [/dev/vdb, /srv/sandbox, ext4, "defaults", "0", "2"]
 
 write_files:
-  # nftables base ruleset
-  - path: /etc/nftables-sandbox.nft
-    permissions: '0644'
-    content: |
-__NFTABLES_CONTENT__
-
   # sandbox-shell (login shell → podman container)
   - path: /usr/local/bin/sandbox-shell
     permissions: '0755'
@@ -89,10 +82,27 @@ __ENTRYPOINT_CONTENT__
     content: |
 __MISE_TOML_CONTENT__
 
-  - path: /opt/sandbox/container/files/bashrc
+  # container dotfiles (deployed by the mise `dotfiles` task inside containers)
+  - path: /opt/sandbox/container/files/dotfiles/bashrc
     permissions: '0644'
     content: |
 __BASHRC_CONTENT__
+
+  - path: /opt/sandbox/container/files/dotfiles/profile.ps1
+    permissions: '0644'
+    content: |
+__PROFILE_PS1_CONTENT__
+
+  - path: /opt/sandbox/container/files/dotfiles/gitconfig
+    permissions: '0644'
+    content: |
+__GITCONFIG_CONTENT__
+
+  # pwsh launcher (bash script that resolves the mise-installed pwsh)
+  - path: /opt/sandbox/container/files/start-pwsh.sh
+    permissions: '0755'
+    content: |
+__START_PWSH_CONTENT__
 
   # sshd hardening — ForceCommand for sandbox users via Match blocks (appended later)
   - path: /etc/ssh/sshd_config.d/99-gleiphnir.conf
@@ -136,10 +146,14 @@ runcmd:
   # Ensure subuid/subgid exist for admin (needed for rootless podman even for admin itself)
   - grep -q "^__ADMIN_USER__:" /etc/subuid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subuid
   - grep -q "^__ADMIN_USER__:" /etc/subgid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subgid
-  # Enable and apply nftables
-  - cp /etc/nftables-sandbox.nft /etc/nftables.conf
-  - systemctl enable nftables 2>/dev/null || systemctl enable nftables.service 2>/dev/null || true
-  - nft -f /etc/nftables.conf 2>&1 | tee /var/log/nftables-apply.log || true
+  # Enable and apply the guest firewall (ufw).
+  # Posture: default-deny incoming, tcp/22 open via a bootstrap rule so the
+  # admin is never locked out. Tighten later with `sandbox-firewall enforce`.
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow from any to any port 22 proto tcp comment gleiphnir-bootstrap
+  - systemctl enable ufw 2>/dev/null || true
+  - ufw --force enable
   # Workaround: ensure podman storage is initialized for admin
   - sudo -u __ADMIN_USER__ podman info 2>&1 | head -20 || true
   # Build container image (also via systemd unit; do it now in cloud-init for faster readiness)
@@ -155,6 +169,6 @@ runcmd:
   # Mark cloud-init done
   - echo "Gleiphnir VM ready at $(date)" > /var/lib/sandbox/ready
   - podman images 2>&1 | tee /var/log/sandbox-images.log || true
-  - nft list ruleset 2>&1 | tee /var/log/nftables-rules.log || true
+  - ufw status verbose 2>&1 | tee /var/log/ufw-status.log || true
 
-final_message: "Gleiphnir VM ready — SSH as __ADMIN_USER__ and run sandbox-user add <name>"
+final_message: "Gleiphnir VM ready — SSH as __ADMIN_USER__, then: sandbox-user add <name>; tighten with sandbox-firewall allow <ip> + sandbox-firewall enforce"

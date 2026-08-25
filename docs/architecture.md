@@ -4,44 +4,52 @@ See `README.md` for user-facing docs. This file is for contributors.
 
 ## Components
 
-- **QEMU/KVM**: runs an Ubuntu cloud image with two virtio drives (system overlay + data disk) and a seed ISO for cloud-init. TAP (`tap-gleiphnir`) enslaved to a private bridge (`br-gleiphnir` 192.168.100.0/24). Host DNAT (`iptables -t nat PREROUTING :2222 → VM:22`) preserves source IPs so `nftables` inside the VM can filter them.
+- **QEMU/KVM** (Linux) or **QEMU/WHPX-TCG** (Windows): runs an Ubuntu 26.04 cloud image with two virtio drives (system overlay + data disk) and a seed ISO for cloud-init. On Linux hosts, TAP (`tap-gleiphnir`) is enslaved to a private bridge (`br-gleiphnir` 192.168.100.0/24) and host DNAT (`iptables -t nat PREROUTING :2222 → VM:22`) preserves source IPs so **ufw inside the VM** can filter them. On Windows hosts, only QEMU user-mode NAT is used — Gleiphnir never modifies host networking or firewall.
 
-- **cloud-init** (`vm/cloud-init/user-data.yaml.tpl` + `prepare-vm.sh` templating):
-  - Creates `admin` (sudo, provided SSH key), installs `podman`/`nftables`/`qemu-guest-agent`, formats and mounts `/dev/vdb` at `/srv/sandbox`.
-  - Drops guest scripts (`sandbox-shell`, `sandbox-user`, `sandbox-firewall`, base nftables ruleset, container build helper) via `write_files`, and container sources under `/opt/sandbox/container/`.
-  - Applies nftables (`/etc/nftables.conf`), enables `sandbox-container-build.service`, builds `localhost/sandbox:latest`, and locks `sshd` to key-only.
+- **Host scripting**: all `vm/scripts/*.ps1` (PowerShell 7+), sharing `lib.ps1`. Orchestration via **mise tasks** in the root `mise.toml` (the old Taskfile.yml was removed). `config/sandbox.env` is loaded through mise `[env] _.file` *and* parsed by `lib.ps1`.
 
-- **Guest scripts** (`vm/guest/`):
-  - `sandbox-shell` — login shell; prepares `/srv/sandbox/$USER`, then `podman run --rm -it --read-only --tmpfs … --cap-drop ALL --security-opt no-new-privileges -v /srv/sandbox/$USER:/work:rw localhost/sandbox:latest`. Rootless via `--userns keep-id` with rootful `sudo podman` fallback.
-  - `sandbox-user` — `useradd -m -s /usr/local/bin/sandbox-shell`, subuid allocation, authorized_keys, workspace dir, `loginctl enable-linger`.
-  - `sandbox-firewall` — wraps `nft add/delete element inet filter {allow,deny}_{ipv4,ipv6}` and snapshots `nft list ruleset > /etc/nftables.conf`.
+- **cloud-init** (`vm/cloud-init/user-data.yaml.tpl` + `prepare-vm.ps1` + `template_userdata.py`):
+  - Creates `admin` (sudo, provided SSH key), installs `podman`/`ufw`/`qemu-guest-agent`, formats and mounts `/dev/vdb` at `/srv/sandbox`.
+  - Drops guest scripts (`sandbox-shell`, `sandbox-user`, `sandbox-firewall`, container build helper) via `write_files`, and container sources under `/opt/sandbox/container/` (including dotfiles and the pwsh launcher).
+  - Applies ufw (default-deny incoming; tcp/22 open via a *bootstrap* rule so admin is never locked out), enables `sandbox-container-build.service`, builds `localhost/sandbox:latest`, warms the shared mise volume, and locks `sshd` to key-only.
 
-- **Container** (`container/`): `ubuntu:24.04` with `git`, `mise` binary, user `dev` (uid 1000, no sudo). `ENTRYPOINT` `entrypoint.sh` sets `MISE_DATA_DIR=/work/.mise/data` etc. (so `mise` writes to the RW workspace while rootfs stays read-only), creates `~/.bashrc` if missing, runs `mise trust --all && mise install --yes`, and execs `bash`. Default manifest at `/etc/sandbox/mise.toml` (node LTS, python 3.12, go, ripgrep, fd, fzf, gh).
+- **Guest scripts** (`vm/guest/`, stay bash — they run inside Ubuntu):
+  - `sandbox-shell` — login shell; prepares `/srv/sandbox/$USER`, then `podman run --rm -it --read-only --cap-drop ALL --security-opt no-new-privileges` with three storage mounts:
+    | mount | backing | scope |
+    |---|---|---|
+    | `/work` | bind `/srv/sandbox/<user>` (data disk) | per-user workspace |
+    | `/home/dev` | named volume `gleiphnir-home-<user>` | per-user home (~/.cache, ~/.local, ~/.config persist) |
+    | `/opt/mise-shared` | named volume `sandbox-mise` | **shared by all users** — mise toolchains download once |
+    Rootless via `--userns keep-id` (`:rw,U` chowns volumes to the mapped user); rootful `sudo podman` fallback.
+  - `sandbox-user` — `useradd -m -s /usr/local/bin/sandbox-shell`, subuid allocation, authorized_keys, workspace dir, `loginctl enable-linger`; on remove also deletes the user's home volume.
+  - `sandbox-firewall` — wraps **ufw**: `allow <ip> → tcp/22`, `deny <ip>` (all ports), `remove`, `list`, and `enforce` (deletes the bootstrap any→:22 rule once a real allow-list exists). Rules persist natively via `ufw.service`.
+  - `build-container.sh` — podman build + **warm-up**: pre-installs the manifest into `sandbox-mise` so no user ever waits for downloads.
+
+- **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, yazi, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh.
 
 ## Networking modes
 
-- `bridge` (default): private isolated bridge + DNAT. VM static `192.168.100.10/24` via cloud-init `network-config.bridge.yaml`. Works on wifi; no physical NIC enslavement. If `PHYS_IF` is set, the script enslaves it for a true LAN bridge (VM gets LAN DHCP).
-
-- `user`: QEMU `-netdev user,hostfwd=tcp::2222-:22`. No sudo/bridge needed, but VM sees only `10.0.2.2` as source, so IP filtering must happen on the **host** (`iptables`/`nftables` there), not in the VM.
+- `bridge` (default, Linux hosts): private isolated bridge + DNAT. VM static `192.168.100.10/24` via cloud-init `network-config.bridge.yaml`. Works on wifi; if `PHYS_IF` is set the script enslaves it for a true LAN bridge.
+- `user` (default on native Windows): QEMU `-netdev user,hostfwd=tcp::2222-:22`. Zero host changes. The VM sees `10.0.2.x` sources, so per-IP guest filtering is meaningless here — use bridge mode (Linux) when you need IP allow/deny semantics.
 
 ## Data flow
 
-1. `task up` → `download-image.sh` → `prepare-vm.sh` (overlay + data qcow2 + templated user-data → seed.iso via `cloud-localds`) → `network-up.sh` (bridge+TAP+DNAT) → `start-vm.sh` (`qemu-system-x86_64 -enable-kvm … -drive system.qcow2 -drive data.qcow2 -drive seed.iso -netdev tap … -daemonize -serial file:console.log -monitor unix:…`).
-2. VM boots, cloud-init runs `runcmd`, mounts `/srv/sandbox`, applies nftables, builds container, restarts sshd.
-3. `task user:add USER=alice` → `manage-user.sh` SSHes as admin, runs `sandbox-user add`.
-4. `ssh alice@192.168.100.10` → shell = `sandbox-shell` → `podman run` → inside `sandbox` container (`/work` RW, rest RO).
+1. `mise run up` → `deps.ps1` → `download-image.ps1` → `prepare-vm.ps1` (overlay + data qcow2 + templated user-data → seed.iso via cloud-localds/genisoimage/pycdlib) → network-up (Linux bridge) → `start-vm.ps1` (`qemu-system-x86_64 … -daemonize` on POSIX; `Start-Process` detached on Windows; monitor = unix socket on Linux / TCP loopback on Windows).
+2. VM boots, cloud-init applies ufw posture, mounts `/srv/sandbox`, builds the image, warms `sandbox-mise`.
+3. `mise run user:add USER=alice` → `manage-user.ps1` SSHes as admin, runs `sandbox-user add`.
+4. `ssh alice@192.168.100.10` → shell = `sandbox-shell` → `podman run` → entrypoint → **pwsh** (AstroNvim/atuin/carapace ready; `bash` still available).
 
 ## Mise layering
 
-- **apt**: `git`, `ca-certificates`, `curl`, `unzip` etc. (system-level, needed to bootstrap mise).
-- **mise (binary)**: baked into the container image (`Containerfile`).
-- **mise (toolchains)**: resolved at *runtime* from `/etc/sandbox/mise.toml` (or `/work/mise.toml` if the user provides one) into `/work/.mise/data`. `mise install --yes` is idempotent; offline or failed fetches don't block the shell.
+- **apt (container)**: minimal OS layer to bootstrap mise.
+- **mise (binary)**: baked into the container image and used on the host for task running.
+- **mise (toolchains)**: container tools resolve from `/etc/sandbox/mise.toml` (or `/work/mise.toml`) into the **shared volume** `/opt/mise-shared/data` — one download serves every user/workspace. Warm-up makes this zero-cost after build; lazy installs still work (RW volume).
+- **mise (config-as-code)**: `[env]` table provides EDITOR/VISUAL/PAGER/MANPAGER in both shells; the `dotfiles` task deploys bashrc/pwsh-profile/gitconfig (personal overrides in `/work/dotfiles` win).
 
 ## Testing
 
-- `task smoke` — admin `podman run --rm --read-only … localhost/sandbox:latest bash -c "…"` checks: image exists, rootfs RO, /work writable, no sudo, git/mise present, firewall `allow → remove` cycle.
-
-- Manual: `task vm:console`, `task vm:ssh`, `podman images`, `nft list ruleset`, SSH as sandbox user.
+- `mise run smoke` — checks: SSH reachable, ufw active, podman works, image + shared volume exist, data disk mounted, container boots into **pwsh**, rootfs RO, /work writable, no sudo, git/mise present, mise env has EDITOR=nvim, core + extended toolset resolves, firewall allow→remove cycle.
+- Manual: `mise run vm:console`, `mise run vm:ssh`, `podman images`, `sudo ufw status numbered`, SSH as a sandbox user, second login to confirm cache/history persistence.
 
 ## Future work
 
@@ -49,4 +57,3 @@ See `README.md` for user-facing docs. This file is for contributors.
 - CSI-like separate RW data drive per org (vs per-user subdirs).
 - Auditing/logging (systemd journal → host, podman events).
 - gVisor/Kata Containers instead of Podman for stronger container isolation.
-- Optional: host-side `nftables` templating that mirrors VM allow-list when `NETWORK_MODE=user`.

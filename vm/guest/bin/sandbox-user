@@ -138,6 +138,8 @@ cmd_remove() {
   if command -v podman >/dev/null 2>&1; then
     # As the user, list containers
     sudo -u "$user" podman ps -aq 2>/dev/null | xargs -r sudo -u "$user" podman rm -f 2>/dev/null || true
+    # Remove the persistent per-user home volume (best-effort, lives in user's rootless storage)
+    sudo -u "$user" podman volume rm "gleiphnir-home-${user}" >/dev/null 2>&1 || true
   fi
   # Kill lingering user processes
   pkill -u "$user" 2>/dev/null || true

@@ -1,32 +1,40 @@
 #!/usr/bin/env bash
-# /usr/local/bin/sandbox-firewall — manage nftables allow/deny sets (admin only)
-# Persists by snapshotting the ruleset to /etc/nftables.conf after each change.
+# /usr/local/bin/sandbox-firewall — manage the VM firewall with ufw (admin only)
+# Model: default-deny incoming; tcp/22 open from allow-listed IPs.
+# A bootstrap rule opens tcp/22 to *any* at provision time so the admin is
+# never locked out; `sandbox-firewall enforce` removes it once your real
+# allow-list is in place. ufw persists rules natively across reboots.
 set -euo pipefail
 
-NFT_BIN="/usr/sbin/nft"
-RULESET_FILE="/etc/nftables.conf"
-BASE_FILE="/etc/nftables-sandbox.nft"
+UFW_BIN="/usr/sbin/ufw"
 
 usage() {
   cat <<'USAGE'
-sandbox-firewall — manage VM firewall IP allow/deny lists
+sandbox-firewall — manage VM firewall (ufw) IP allow/deny lists
 
 Usage:
   sandbox-firewall allow <IP>[/prefix]    allow IP/net to reach SSH (tcp/22)
-  sandbox-firewall deny  <IP>[/prefix]    block IP/net (even if allowed)
-  sandbox-firewall remove <IP>[/prefix]   remove IP from both allow and deny sets
-  sandbox-firewall list                   show all sets
+  sandbox-firewall deny  <IP>[/prefix]    block ALL traffic from IP/net
+  sandbox-firewall remove <IP>[/prefix]   remove matching allow and deny rules
+  sandbox-firewall enforce                lock down: drop bootstrap "any → :22" rule
+  sandbox-firewall list                   show status + rules
 
 Examples:
   sandbox-firewall allow 203.0.113.42
   sandbox-firewall allow 198.51.100.0/24
   sandbox-firewall deny  192.0.2.55
   sandbox-firewall remove 203.0.113.42
-  sandbox-firewall list
+  sandbox-firewall enforce
 
-Persistence:
-  After each change the current ruleset is saved to /etc/nftables.conf
-  (the file nftables.service restores on boot).
+Notes:
+  - deny rules take precedence over allow for the same source (ufw evaluates
+    rules in order; add denies after removing allows for that IP).
+  - Rules persist across reboots via the ufw systemd service.
+
+Workflow:
+  1. Provision opens tcp/22 to any (bootstrap rule) so SSH keeps working.
+  2. Add your real client IPs:      sandbox-firewall allow <your-ip>
+  3. Lock down:                     sandbox-firewall enforce
 USAGE
 }
 
@@ -39,81 +47,90 @@ require_root() {
   fi
 }
 
-is_ipv6() {
-  [[ "$1" == *:* ]]
+require_ufw() {
+  [ -x "$UFW_BIN" ] || die "ufw not found at $UFW_BIN (apt-get install ufw)"
 }
 
-save_ruleset() {
-  # Persist current ruleset so it survives reboot
-  if "$NFT_BIN" list ruleset > "$RULESET_FILE" 2>/dev/null; then
-    echo "Ruleset saved to $RULESET_FILE"
-  else
-    echo "warning: failed to save ruleset to $RULESET_FILE" >&2
+is_active() {
+  "$UFW_BIN" status 2>/dev/null | grep -q "Status: active"
+}
+
+ensure_defaults() {
+  # Idempotent posture: deny incoming, allow outgoing, enable if inactive.
+  "$UFW_BIN" default deny incoming  >/dev/null || true
+  "$UFW_BIN" default allow outgoing >/dev/null || true
+  if ! is_active; then
+    # Never lock out an active SSH session: allow its client IP first.
+    if [ -n "${SSH_CONNECTION:-}" ]; then
+      client_ip="$(echo "$SSH_CONNECTION" | awk '{print $1}')"
+      echo "Active SSH session detected from $client_ip — allowing it before enabling."
+      "$UFW_BIN" insert 1 allow from "$client_ip" to any port 22 proto tcp >/dev/null || true
+    fi
+    echo "Enabling ufw ..."
+    "$UFW_BIN" --force enable >/dev/null
   fi
-}
-
-add_element() {
-  local set="$1" elem="$2"
-  # nft add element is idempotent; duplicates are ignored
-  if ! "$NFT_BIN" add element inet filter "$set" "{ $elem }" 2>&1; then
-    # Try without braces for single element (older nft)
-    "$NFT_BIN" add element inet filter "$set" "{ $elem }" 2>&1 || die "nft add element failed for $set { $elem }"
-  fi
-}
-
-delete_element() {
-  local set="$1" elem="$2"
-  "$NFT_BIN" delete element inet filter "$set" "{ $elem }" 2>/dev/null || true
 }
 
 cmd_allow() {
-  require_root
+  require_root; require_ufw; ensure_defaults
   local ip="${1:-}"; [ -n "$ip" ] || die "allow requires an IP"
-  local set
-  if is_ipv6 "$ip"; then set="allow_ipv6"; else set="allow_ipv4"; fi
-  echo "Allowing $ip (set: $set) ..."
-  add_element "$set" "$ip"
-  save_ruleset
+  echo "Allowing $ip → tcp/22 ..."
+  "$UFW_BIN" allow from "$ip" to any port 22 proto tcp
   echo "Allowed $ip"
 }
 
 cmd_deny() {
-  require_root
+  require_root; require_ufw; ensure_defaults
   local ip="${1:-}"; [ -n "$ip" ] || die "deny requires an IP"
-  local set
-  if is_ipv6 "$ip"; then set="deny_ipv6"; else set="deny_ipv4"; fi
-  echo "Blocking $ip (set: $set) ..."
-  add_element "$set" "$ip"
-  save_ruleset
+  echo "Blocking $ip (all ports) ..."
+  "$UFW_BIN" deny from "$ip"
   echo "Denied $ip"
 }
 
 cmd_remove() {
-  require_root
+  require_root; require_ufw
   local ip="${1:-}"; [ -n "$ip" ] || die "remove requires an IP"
-  echo "Removing $ip from all sets ..."
-  for set in allow_ipv4 allow_ipv6 deny_ipv4 deny_ipv6; do
-    delete_element "$set" "$ip"
-  done
-  save_ruleset
-  echo "Removed $ip (if it was present)"
+  echo "Removing rules for $ip ..."
+  "$UFW_BIN" delete allow from "$ip" to any port 22 proto tcp >/dev/null 2>&1 || true
+  "$UFW_BIN" delete deny from "$ip"                                  >/dev/null 2>&1 || true
+  echo "Removed $ip (if present)"
+}
+
+cmd_enforce() {
+  require_root; require_ufw; ensure_defaults
+  echo "Enforcing strict mode: removing blanket tcp/22 allow ..."
+  # The bootstrap rule is exactly this spec; deleting it leaves only explicit
+  # source-IP allows. Idempotent: reports when nothing was left to remove.
+  out="$("$UFW_BIN" delete allow from any to any port 22 proto tcp 2>&1)" || true
+  if echo "$out" | grep -qi "non-existent\|not found\|could not"; then
+    echo "(no blanket rule found — already enforced)"
+  else
+    echo "$out"
+    echo "Removed blanket tcp/22 allow."
+  fi
+  "$UFW_BIN" --force enable >/dev/null 2>&1 || true
+  echo "Strict mode active: only explicitly allowed IPs can reach sshd."
 }
 
 cmd_list() {
-  echo "=== nftables sets (inet filter) ==="
-  for set in allow_ipv4 allow_ipv6 deny_ipv4 deny_ipv6; do
-    echo "--- $set ---"
-    "$NFT_BIN" list set inet filter "$set" 2>&1 || echo "(empty or error)"
-    echo ""
-  done
-  echo "=== full ruleset (filtered) ==="
-  "$NFT_BIN" list ruleset 2>&1 | head -80 || true
+  require_root; require_ufw
+  echo "=== ufw status ==="
+  "$UFW_BIN" status verbose || true
+  echo ""
+  echo "=== rules (numbered) ==="
+  "$UFW_BIN" status numbered || true
+  echo ""
+  if "$UFW_BIN" status 2>/dev/null | awk '$0 ~ /ALLOW/' | grep -v "Status:" | grep -Eq "Anywhere.*22/tcp|22/tcp.*Anywhere"; then
+    echo "NOTE: bootstrap rule still active — run 'sudo sandbox-firewall enforce'"
+    echo "      once you have added your real allow-list entries."
+  fi
 }
 
 case "${1:-}" in
   allow)  shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_allow "$@" ;;
   deny)   shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_deny "$@" ;;
   remove|delete|unallow|undeny) shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_remove "$@" ;;
+  enforce|lockdown) cmd_enforce ;;
   list|show|status) cmd_list ;;
   -h|--help|help|"") usage; exit 1 ;;
   *) die "unknown command: $1 (see --help)" ;;

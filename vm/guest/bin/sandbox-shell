@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
 # /usr/local/bin/sandbox-shell — login shell for sandbox users
-# Spawns an ephemeral, read-only podman container with an RW workspace at /work.
+# Spawns an ephemeral, read-only podman container with:
+#   - RW persistent workspace at /work  (bind: /srv/sandbox/<user>)
+#   - RW persistent per-user home volume (~/.cache, ~/.local, ~/.config)
+#   - SHARED mise tool volume (sandbox-mise) — binaries download once for all users
 # Workspace persists at /srv/sandbox/<user> on the VM's data disk.
 set -euo pipefail
 
 USER_NAME="$(id -un)"
 WORKSPACE="/srv/sandbox/${USER_NAME}"
+HOME_VOLUME="gleiphnir-home-${USER_NAME}"
+MISE_VOLUME="sandbox-mise"
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/sandbox:latest}"
 
 # If invoked as `sandbox-shell --help` or with explicit args, show usage
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  cat <<'HELP'
+  cat <<HELP
 sandbox-shell — ephemeral sandbox container shell
 
 Usage: sandbox-shell
   When set as a user's login shell, it automatically starts a podman container:
     - rootfs: read-only, cap-drop ALL, no-new-privileges
     - workspace: /srv/sandbox/<you> mounted at /work (RW, persistent)
-    - home: tmpfs at /home/dev (ephemeral; mise data persists in /work/.mise)
-    - tools: installed via mise from /etc/sandbox/mise.toml (lazy, cached in /work/.mise)
+    - home: named volume '$HOME_VOLUME' at /home/dev (RW, persists caches/history/configs)
+    - tools: shared volume '$MISE_VOLUME' mounted at /opt/mise-shared (downloads once for all users)
+    - default shell inside the container: pwsh (bash fallback until first install)
 
 Config env:
   CONTAINER_IMAGE  container to run (default: localhost/sandbox:latest)
@@ -29,8 +35,6 @@ fi
 # Ensure workspace exists
 if [ ! -d "$WORKSPACE" ]; then
   mkdir -p "$WORKSPACE"
-  # Workspace is owned by the host user; inside container we preserve UID via keep-id / rootful mapping.
-  # Make it private by default.
   chmod 700 "$WORKSPACE" 2>/dev/null || true
   # Seed with a README on first creation
   if [ ! -e "$WORKSPACE/README.md" ]; then
@@ -40,11 +44,14 @@ if [ ! -d "$WORKSPACE" ]; then
 This directory is your persistent workspace. It is bind-mounted into every
 sandbox container at `/work` with read-write access.
 
-- Container rootfs is **read-only** and **ephemeral** (`--rm`); changes outside `/work` do not persist.
-- Install tools with `mise` — they are cached under `/work/.mise` and survive restarts.
-  Example: `mise use node@lts`, `mise use python@3.12`, `mise install`
-- Standard tools (ripgrep, fd, jq, fzf, gh) are declared in `/etc/sandbox/mise.toml`
-  and auto-installed on first shell start (mise lazy bootstrap).
+- Container rootfs is **read-only** and **ephemeral** (`--rm`); changes outside
+  `/work` and your home directory do not persist.
+- Your home (`~`) is a persistent per-user volume: `~/.cache`, `~/.local`,
+  `~/.config` survive restarts (shell history via atuin included).
+- Tools come from a **shared** mise volume (`/opt/mise-shared`): common
+  toolchains are pre-installed and downloaded only once for everyone.
+  Install extras with `mise use node@lts`, `mise use python@3.12`, ...
+- Default shell is **pwsh**. `bash` is also available.
 - No `sudo` inside the container. If you need system packages, ask the admin.
 
 Happy hacking.
@@ -52,6 +59,11 @@ EOF
     chmod 644 "$WORKSPACE/README.md" 2>/dev/null || true
   fi
 fi
+
+# Ensure the shared mise volume and this user's home volume exist.
+# (podman also auto-creates named volumes, but being explicit gives clearer errors.)
+podman volume inspect "$MISE_VOLUME" >/dev/null 2>&1 || podman volume create "$MISE_VOLUME" >/dev/null
+podman volume inspect "$HOME_VOLUME" >/dev/null 2>&1 || podman volume create "$HOME_VOLUME" >/dev/null
 
 # Verify image exists
 if ! podman image exists "$CONTAINER_IMAGE" 2>/dev/null; then
@@ -80,25 +92,25 @@ COMMON_ARGS=(
   --read-only
   --tmpfs /tmp:rw,size=512m,mode=1777
   --tmpfs /run:rw,size=64m,mode=755
-  --tmpfs /home/dev:rw,size=256m,mode=777
   --cap-drop ALL
   --security-opt no-new-privileges
   --pids-limit 512
   --memory 2g
   --cpus 2
+  # persistent per-user home (replaces the old tmpfs home)
+  -v "${HOME_VOLUME}:/home/dev:rw,U"
+  # shared mise tool installs (download once, used by every sandbox user)
+  -v "${MISE_VOLUME}:/opt/mise-shared:rw,U"
   -v "${WORKSPACE}:/work:rw"
   -w /work
   -e HOME=/home/dev
   -e USER=dev
-  -e SHELL=/bin/bash
-  -e MISE_DATA_DIR=/work/.mise/data
-  -e MISE_STATE_DIR=/work/.mise/state
-  -e MISE_CACHE_DIR=/work/.mise/cache
+  -e SHELL=/usr/local/bin/sandbox-pwsh
+  -e MISE_DATA_DIR=/opt/mise-shared/data
+  -e MISE_STATE_DIR=/opt/mise-shared/state
+  -e MISE_CACHE_DIR=/opt/mise-shared/cache
   -e MISE_CONFIG_DIR=/work/.mise/config
-  -e XDG_DATA_HOME=/work/.mise/data
-  -e XDG_STATE_HOME=/work/.mise/state
-  -e XDG_CACHE_HOME=/work/.mise/cache
-  -e XDG_CONFIG_HOME=/work/.mise/config
+  -e MISE_GLOBAL_CONFIG_FILE=/etc/sandbox/mise.toml
   --hostname "sandbox"
 )
 

@@ -16,12 +16,10 @@ vm/images/mac.addr
 # .ssh/
 # Keep the path in config/sandbox.env pointing outside the repo anyway
 
-# mise local cache
+# mise local cache / local overrides
 .mise/
-.mise.toml.local
-
-# Task cache
-.task/
+.mise.local.toml
+mise.local.toml
 
 # OS
 .DS_Store
