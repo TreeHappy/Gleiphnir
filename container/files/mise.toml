@@ -1,0 +1,19 @@
+# /etc/sandbox/mise.toml — default tool manifest for Gleiphnir sandboxes
+# Installed lazily into /work/.mise/data on first container start.
+# Users can override/extend by placing their own mise.toml in /work.
+[tools]
+# CLI essentials (via aqua/ubi backends — mise resolves these automatically)
+ripgrep = "latest"
+fd = "latest"
+fzf = "latest"
+# gh is provided as `gh` via aqua:cli/cli internally
+"aqua:cli/cli" = "latest"
+# Language runtimes
+node = "lts"
+python = "3.12"
+golang = "latest"
+
+[settings]
+experimental = true
+not_found_auto_install = true
+jobs = 4

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-shell — login shell for sandbox users
+# Spawns an ephemeral, read-only podman container with an RW workspace at /work.
+# Workspace persists at /srv/sandbox/<user> on the VM's data disk.
+set -euo pipefail
+
+USER_NAME="$(id -un)"
+WORKSPACE="/srv/sandbox/${USER_NAME}"
+CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/sandbox:latest}"
+
+# If invoked as `sandbox-shell --help` or with explicit args, show usage
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'HELP'
+sandbox-shell — ephemeral sandbox container shell
+
+Usage: sandbox-shell
+  When set as a user's login shell, it automatically starts a podman container:
+    - rootfs: read-only, cap-drop ALL, no-new-privileges
+    - workspace: /srv/sandbox/<you> mounted at /work (RW, persistent)
+    - home: tmpfs at /home/dev (ephemeral; mise data persists in /work/.mise)
+    - tools: installed via mise from /etc/sandbox/mise.toml (lazy, cached in /work/.mise)
+
+Config env:
+  CONTAINER_IMAGE  container to run (default: localhost/sandbox:latest)
+HELP
+  exit 0
+fi
+
+# Ensure workspace exists
+if [ ! -d "$WORKSPACE" ]; then
+  mkdir -p "$WORKSPACE"
+  # Workspace is owned by the host user; inside container we preserve UID via keep-id / rootful mapping.
+  # Make it private by default.
+  chmod 700 "$WORKSPACE" 2>/dev/null || true
+  # Seed with a README on first creation
+  if [ ! -e "$WORKSPACE/README.md" ]; then
+    cat > "$WORKSPACE/README.md" <<'EOF'
+# Workspace
+
+This directory is your persistent workspace. It is bind-mounted into every
+sandbox container at `/work` with read-write access.
+
+- Container rootfs is **read-only** and **ephemeral** (`--rm`); changes outside `/work` do not persist.
+- Install tools with `mise` — they are cached under `/work/.mise` and survive restarts.
+  Example: `mise use node@lts`, `mise use python@3.12`, `mise install`
+- Standard tools (ripgrep, fd, jq, fzf, gh) are declared in `/etc/sandbox/mise.toml`
+  and auto-installed on first shell start (mise lazy bootstrap).
+- No `sudo` inside the container. If you need system packages, ask the admin.
+
+Happy hacking.
+EOF
+    chmod 644 "$WORKSPACE/README.md" 2>/dev/null || true
+  fi
+fi
+
+# Verify image exists
+if ! podman image exists "$CONTAINER_IMAGE" 2>/dev/null; then
+  echo "Sandbox image $CONTAINER_IMAGE not found. The VM is still provisioning — please wait ~1–2 minutes and reconnect." >&2
+  echo "Admin can run: /usr/local/lib/sandbox/build-container.sh" >&2
+  sleep 3
+  if ! podman image exists "$CONTAINER_IMAGE" 2>/dev/null; then
+    exit 1
+  fi
+fi
+
+# Detect whether rootless podman works for this user
+USE_ROOTLESS=1
+if ! podman info >/dev/null 2>&1; then
+  USE_ROOTLESS=0
+fi
+
+# Also check if keep-id is supported (podman >= 4)
+HAS_KEEP_ID=0
+if podman run --help 2>&1 | grep -q "userns"; then
+  HAS_KEEP_ID=1
+fi
+
+COMMON_ARGS=(
+  --rm -it
+  --read-only
+  --tmpfs /tmp:rw,size=512m,mode=1777
+  --tmpfs /run:rw,size=64m,mode=755
+  --tmpfs /home/dev:rw,size=256m,mode=777
+  --cap-drop ALL
+  --security-opt no-new-privileges
+  --pids-limit 512
+  --memory 2g
+  --cpus 2
+  -v "${WORKSPACE}:/work:rw"
+  -w /work
+  -e HOME=/home/dev
+  -e USER=dev
+  -e SHELL=/bin/bash
+  -e MISE_DATA_DIR=/work/.mise/data
+  -e MISE_STATE_DIR=/work/.mise/state
+  -e MISE_CACHE_DIR=/work/.mise/cache
+  -e MISE_CONFIG_DIR=/work/.mise/config
+  -e XDG_DATA_HOME=/work/.mise/data
+  -e XDG_STATE_HOME=/work/.mise/state
+  -e XDG_CACHE_HOME=/work/.mise/cache
+  -e XDG_CONFIG_HOME=/work/.mise/config
+  --hostname "sandbox"
+)
+
+if [ "$USE_ROOTLESS" = "1" ]; then
+  # Rootless: preserve host UID for volume ownership via keep-id if available
+  if [ "$HAS_KEEP_ID" = "1" ]; then
+    exec podman run "${COMMON_ARGS[@]}" --userns keep-id "$CONTAINER_IMAGE"
+  else
+    exec podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE"
+  fi
+else
+  # Rootful fallback via sudo (admin must have allowed this user in sudoers for podman)
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE"
+  else
+    echo "podman not usable for user $USER_NAME (neither rootless nor sudo podman available)" >&2
+    exit 1
+  fi
+fi

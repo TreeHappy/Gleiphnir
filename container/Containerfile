@@ -1,0 +1,45 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+# Minimal apt base — only what mise and git need at the OS layer.
+# Everything else (node, python, go, rg, fd, jq, fzf, gh ...) is installed via mise
+# into the RW workspace (/work/.mise) at first shell start.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    unzip \
+    git \
+    openssh-client \
+    bash \
+    less \
+    procps \
+    jq \
+    wget \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /usr/bin/sudo /usr/bin/su 2>/dev/null || true
+
+# Install mise (binary only; toolchains are installed lazily into /work/.mise)
+RUN curl -fsSL https://mise.run | sh \
+    && mv /root/.local/bin/mise /usr/local/bin/mise \
+    && chmod +x /usr/local/bin/mise \
+    && mise --version
+
+# Create non-root user (no sudo, no extra groups)
+RUN useradd -m -s /bin/bash -u 1000 dev \
+    && mkdir -p /work /etc/sandbox \
+    && chown dev:dev /work \
+    && chmod 755 /work
+
+# Default mise manifest and sandbox shell config (also shipped as /etc/sandbox/* inside VM build script)
+COPY files/mise.toml /etc/sandbox/mise.toml
+COPY files/bashrc /etc/sandbox/bashrc
+COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh \
+    && chown dev:dev /etc/sandbox/mise.toml /etc/sandbox/bashrc 2>/dev/null || true
+
+USER dev
+WORKDIR /work
+
+ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint.sh"]
+CMD ["/bin/bash"]

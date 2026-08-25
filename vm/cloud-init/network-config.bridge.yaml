@@ -1,0 +1,11 @@
+version: 2
+ethernets:
+  vmnet:
+    match:
+      name: "en*"
+    addresses: ["__VM_IP__/__VM_NETMASK__"]
+    routes:
+      - to: default
+        via: "__VM_GATEWAY__"
+    nameservers:
+      addresses: [1.1.1.1, 8.8.8.8, "__VM_GATEWAY__"]

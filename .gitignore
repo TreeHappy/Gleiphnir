@@ -1,0 +1,34 @@
+# VM artifacts
+vm/images/
+*.qcow2
+*.img
+*.iso
+*.log
+*.sock
+*.pid
+vm/images/seed.iso
+vm/images/system.qcow2
+vm/images/data.qcow2
+vm/images/mac.addr
+
+# Host admin keys (generated)
+# Uncomment if you don't want to commit them:
+# .ssh/
+# Keep the path in config/sandbox.env pointing outside the repo anyway
+
+# mise local cache
+.mise/
+.mise.toml.local
+
+# Task cache
+.task/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~

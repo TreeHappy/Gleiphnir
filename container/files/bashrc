@@ -1,0 +1,46 @@
+# /etc/sandbox/bashrc — sourced as ~/.bashrc inside the sandbox container
+# Keep it minimal and deterministic.
+
+# mise activation
+if command -v mise >/dev/null 2>&1; then
+  eval "$(mise activate bash)"
+  # Ensure shims are on PATH even if activation is partial
+  if [ -n "${MISE_DATA_DIR:-}" ] && [ -d "$MISE_DATA_DIR/shims" ]; then
+    case ":$PATH:" in
+      *":$MISE_DATA_DIR/shims:"*) ;;
+      *) export PATH="$MISE_DATA_DIR/shims:$PATH" ;;
+    esac
+  fi
+fi
+
+# Sensible defaults
+export EDITOR="${EDITOR:-vi}"
+export PAGER="${PAGER:-less}"
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
+# Prompt: user@container:work
+if [ -n "${BASH_VERSION:-}" ]; then
+  PS1='\[\e[32m\]dev@sandbox\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ '
+fi
+
+# Helpful aliases
+alias ll='ls -lah'
+alias la='ls -A'
+alias l='ls -CF'
+alias gs='git status'
+alias gd='git diff'
+alias gl='git log --oneline --graph --decorate -n 20'
+
+# Workspace reminder on first login
+if [ -t 1 ] && [ ! -f /work/.sandbox-welcomed ]; then
+  cat <<'WELCOME'
+┌─ Gleiphnir sandbox ──────────────────────────────────────────┐
+│ Container rootfs is read-only & ephemeral.                   │
+│ Persistent workspace:  /work  (→ /srv/sandbox/<you> on VM)  │
+│ Tools via mise:        mise use node@lts / python@3.12 ...  │
+│ Default tools install lazily into /work/.mise (first run). │
+└──────────────────────────────────────────────────────────────┘
+WELCOME
+  touch /work/.sandbox-welcomed 2>/dev/null || true
+fi

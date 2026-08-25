@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-user — manage sandbox users on the VM (admin only)
+set -euo pipefail
+
+SHELL_PATH="/usr/local/bin/sandbox-shell"
+
+usage() {
+  cat <<'USAGE'
+sandbox-user — manage sandbox users
+
+Usage:
+  sandbox-user add <username> [--key-file <path> | --key "<ssh-pubkey>"]
+  sandbox-user remove <username>
+  sandbox-user list
+
+Notes:
+  - Requires root (run via sudo).
+  - "add" creates a Linux user with login shell = sandbox-shell,
+    sets up subuid/subgid for rootless podman, creates /srv/sandbox/<user>,
+    and installs the provided SSH public key into authorized_keys.
+  - Username must match ^[a-z_][a-z0-9_-]{0,31}$ (same as useradd).
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "sandbox-user must be run as root (use sudo)" >&2
+    exit 1
+  fi
+}
+
+valid_user() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+}
+
+ensure_subuid() {
+  local user="$1"
+  local subuid_file="/etc/subuid"
+  local subgid_file="/etc/subgid"
+  if ! grep -q "^${user}:" "$subuid_file" 2>/dev/null; then
+    # Find next free subuid range (start at 100000, step 65536)
+    local base=100000
+    if [ -f "$subuid_file" ] && [ -s "$subuid_file" ]; then
+      # naive: take max start + 65536
+      local max
+      max=$(awk -F: '{print $2+$3}' "$subuid_file" 2>/dev/null | sort -n | tail -1 || echo 100000)
+      if [ -n "$max" ] && [ "$max" -ge 100000 ]; then
+        base=$((max + 1))
+        # align to 65536 boundary
+        base=$(( (base + 65535) / 65536 * 65536 ))
+      fi
+    fi
+    echo "${user}:${base}:65536" >> "$subuid_file"
+    echo "${user}:${base}:65536" >> "$subgid_file"
+    echo "Allocated subuid/subgid $base:65536 for $user"
+  fi
+}
+
+cmd_add() {
+  require_root
+  local user="$1"; shift
+  valid_user "$user" || die "invalid username: $user"
+  if id "$user" >/dev/null 2>&1; then
+    die "user $user already exists"
+  fi
+
+  local key_file=""
+  local key_literal=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --key-file) key_file="$2"; shift 2 ;;
+      --key) key_literal="$2"; shift 2 ;;
+      *) die "unknown option for add: $1" ;;
+    esac
+  done
+
+  local pubkey=""
+  if [ -n "$key_file" ]; then
+    if [ "$key_file" = "/dev/stdin" ]; then
+      pubkey="$(cat)"
+    elif [ -f "$key_file" ]; then
+      pubkey="$(cat "$key_file")"
+    else
+      die "key file not found: $key_file"
+    fi
+  elif [ -n "$key_literal" ]; then
+    pubkey="$key_literal"
+  else
+    die "add requires --key-file <path> or --key \"<pubkey>\""
+  fi
+
+  [ -n "$pubkey" ] || die "empty SSH public key"
+  # Basic validation
+  if ! echo "$pubkey" | grep -qE '^(ssh-(rsa|ed25519|ecdsa)|sk-ssh-) '; then
+    echo "warning: pubkey does not look like a standard SSH key, continuing anyway" >&2
+  fi
+
+  echo "Creating user $user ..."
+  useradd -m -s "$SHELL_PATH" "$user"
+  ensure_subuid "$user"
+  # Enable lingering so podman rootless can work without active session
+  loginctl enable-linger "$user" 2>/dev/null || true
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  mkdir -p "$home/.ssh"
+  echo "$pubkey" > "$home/.ssh/authorized_keys"
+  chmod 700 "$home/.ssh"
+  chmod 600 "$home/.ssh/authorized_keys"
+  chown -R "$user:$user" "$home/.ssh"
+
+  # Workspace on data disk
+  local work="/srv/sandbox/$user"
+  mkdir -p "$work"
+  chown "$user:$user" "$work"
+  chmod 700 "$work"
+
+  # Lock password auth for this user (keys only)
+  passwd -l "$user" >/dev/null 2>&1 || true
+
+  echo "User $user created."
+  echo "  home:      $home"
+  echo "  workspace: $work"
+  echo "  shell:     $SHELL_PATH (→ podman container)"
+}
+
+cmd_remove() {
+  require_root
+  local user="$1"
+  valid_user "$user" || die "invalid username: $user"
+  if ! id "$user" >/dev/null 2>&1; then
+    die "user $user does not exist"
+  fi
+  echo "Removing user $user ..."
+  # Kill any active podman containers for this user (best-effort)
+  if command -v podman >/dev/null 2>&1; then
+    # As the user, list containers
+    sudo -u "$user" podman ps -aq 2>/dev/null | xargs -r sudo -u "$user" podman rm -f 2>/dev/null || true
+  fi
+  # Kill lingering user processes
+  pkill -u "$user" 2>/dev/null || true
+  sleep 1
+  userdel -r "$user" 2>/dev/null || userdel "$user" || true
+  # Clean subuid/subgid entries
+  sed -i "/^${user}:/d" /etc/subuid 2>/dev/null || true
+  sed -i "/^${user}:/d" /etc/subgid 2>/dev/null || true
+  # Optionally keep workspace; we remove it (admin can recover from backup)
+  rm -rf "/srv/sandbox/$user"
+  loginctl disable-linger "$user" 2>/dev/null || true
+  echo "User $user removed."
+}
+
+cmd_list() {
+  echo "=== sandbox users (shell = $SHELL_PATH) ==="
+  # List by checking passwd entries whose shell is sandbox-shell
+  local found=0
+  while IFS=: read -r name _ uid gid _ home shell; do
+    if [ "$shell" = "$SHELL_PATH" ]; then
+      printf "  %-16s uid=%-5s home=%-20s work=/srv/sandbox/%s\n" "$name" "$uid" "$home" "$name"
+      found=1
+    fi
+  done < /etc/passwd
+  if [ "$found" -eq 0 ]; then
+    echo "  (none)"
+  fi
+  echo ""
+  echo "=== workspaces in /srv/sandbox ==="
+  if [ -d /srv/sandbox ]; then
+    ls -1 /srv/sandbox 2>&1 | sed 's/^/  /' || echo "  (empty)"
+  else
+    echo "  /srv/sandbox not mounted"
+  fi
+}
+
+# ── main ───────────────────────────────────────────────────────────────────
+case "${1:-}" in
+  add)    shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_add "$@" ;;
+  remove) shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_remove "$@" ;;
+  list)   cmd_list ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

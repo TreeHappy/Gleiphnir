@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-firewall — manage nftables allow/deny sets (admin only)
+# Persists by snapshotting the ruleset to /etc/nftables.conf after each change.
+set -euo pipefail
+
+NFT_BIN="/usr/sbin/nft"
+RULESET_FILE="/etc/nftables.conf"
+BASE_FILE="/etc/nftables-sandbox.nft"
+
+usage() {
+  cat <<'USAGE'
+sandbox-firewall — manage VM firewall IP allow/deny lists
+
+Usage:
+  sandbox-firewall allow <IP>[/prefix]    allow IP/net to reach SSH (tcp/22)
+  sandbox-firewall deny  <IP>[/prefix]    block IP/net (even if allowed)
+  sandbox-firewall remove <IP>[/prefix]   remove IP from both allow and deny sets
+  sandbox-firewall list                   show all sets
+
+Examples:
+  sandbox-firewall allow 203.0.113.42
+  sandbox-firewall allow 198.51.100.0/24
+  sandbox-firewall deny  192.0.2.55
+  sandbox-firewall remove 203.0.113.42
+  sandbox-firewall list
+
+Persistence:
+  After each change the current ruleset is saved to /etc/nftables.conf
+  (the file nftables.service restores on boot).
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "sandbox-firewall must be run as root (use sudo)" >&2
+    exit 1
+  fi
+}
+
+is_ipv6() {
+  [[ "$1" == *:* ]]
+}
+
+save_ruleset() {
+  # Persist current ruleset so it survives reboot
+  if "$NFT_BIN" list ruleset > "$RULESET_FILE" 2>/dev/null; then
+    echo "Ruleset saved to $RULESET_FILE"
+  else
+    echo "warning: failed to save ruleset to $RULESET_FILE" >&2
+  fi
+}
+
+add_element() {
+  local set="$1" elem="$2"
+  # nft add element is idempotent; duplicates are ignored
+  if ! "$NFT_BIN" add element inet filter "$set" "{ $elem }" 2>&1; then
+    # Try without braces for single element (older nft)
+    "$NFT_BIN" add element inet filter "$set" "{ $elem }" 2>&1 || die "nft add element failed for $set { $elem }"
+  fi
+}
+
+delete_element() {
+  local set="$1" elem="$2"
+  "$NFT_BIN" delete element inet filter "$set" "{ $elem }" 2>/dev/null || true
+}
+
+cmd_allow() {
+  require_root
+  local ip="${1:-}"; [ -n "$ip" ] || die "allow requires an IP"
+  local set
+  if is_ipv6 "$ip"; then set="allow_ipv6"; else set="allow_ipv4"; fi
+  echo "Allowing $ip (set: $set) ..."
+  add_element "$set" "$ip"
+  save_ruleset
+  echo "Allowed $ip"
+}
+
+cmd_deny() {
+  require_root
+  local ip="${1:-}"; [ -n "$ip" ] || die "deny requires an IP"
+  local set
+  if is_ipv6 "$ip"; then set="deny_ipv6"; else set="deny_ipv4"; fi
+  echo "Blocking $ip (set: $set) ..."
+  add_element "$set" "$ip"
+  save_ruleset
+  echo "Denied $ip"
+}
+
+cmd_remove() {
+  require_root
+  local ip="${1:-}"; [ -n "$ip" ] || die "remove requires an IP"
+  echo "Removing $ip from all sets ..."
+  for set in allow_ipv4 allow_ipv6 deny_ipv4 deny_ipv6; do
+    delete_element "$set" "$ip"
+  done
+  save_ruleset
+  echo "Removed $ip (if it was present)"
+}
+
+cmd_list() {
+  echo "=== nftables sets (inet filter) ==="
+  for set in allow_ipv4 allow_ipv6 deny_ipv4 deny_ipv6; do
+    echo "--- $set ---"
+    "$NFT_BIN" list set inet filter "$set" 2>&1 || echo "(empty or error)"
+    echo ""
+  done
+  echo "=== full ruleset (filtered) ==="
+  "$NFT_BIN" list ruleset 2>&1 | head -80 || true
+}
+
+case "${1:-}" in
+  allow)  shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_allow "$@" ;;
+  deny)   shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_deny "$@" ;;
+  remove|delete|unallow|undeny) shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_remove "$@" ;;
+  list|show|status) cmd_list ;;
+  -h|--help|help|"") usage; exit 1 ;;
+  *) die "unknown command: $1 (see --help)" ;;
+esac

@@ -1,0 +1,15 @@
+# mise — host tooling for Gleiphnir
+# Install with: mise install  (or: curl https://mise.run | sh)
+# These are convenience tools for the host side; the QEMU VM and sandbox
+# container have their own installs via apt/cloud-init and container mise.
+
+[tools]
+# Taskfile runner (portable Make alternative)
+task = "latest"
+# Go-task's upstream is often listed as "task" in the mise registry;
+# if `mise install` fails to resolve `task`, use `aqua:go-task/task` instead:
+# "aqua:go-task/task" = "latest"
+
+[settings]
+experimental = true
+not_found_auto_install = true
