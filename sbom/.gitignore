@@ -1,0 +1,6 @@
+# Generated SBOM files (produced by `mise run sbom:*`)
+*.spdx.json
+*.cdx.json
+*.spdx
+*.cdx.xml
+sbom-*.json

@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-tools — inspect and manage mise tool installs
+# Runs inside the sandbox container. Shows all installed tools (shared + personal),
+# disk usage, and lets users clean their personal installs.
+set -euo pipefail
+
+MISE_DATA_DIR="${MISE_DATA_DIR:-/opt/mise-shared/data}"
+USER_DATA_DIR="${HOME}/.local/share/mise/data"
+SHARED_INSTALLS="${MISE_DATA_DIR}/installs"
+USER_INSTALLS="${USER_DATA_DIR}/installs"
+
+usage() {
+  cat <<'USAGE'
+sandbox-tools — inspect and manage mise tool installs
+
+Usage:
+  sandbox-tools list                  List all installed tools (shared + personal)
+  sandbox-tools info [TOOL]           Show details for a specific tool
+  sandbox-tools clean TOOL            Remove a personal tool install (cannot remove shared tools)
+  sandbox-tools clean:all             Remove all personal tool installs
+  sandbox-tools volumes               Show volume mount and disk usage info
+  sandbox-tools --help                Show this help
+
+Notes:
+  - Shared tools (in /opt/mise-shared) cannot be removed by users.
+  - Only personal installs (~/.local/share/mise) can be deleted.
+  - Use `mise use <tool>@<version>` to install a personal copy of a tool.
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# ── human-readable size ──────────────────────────────────────────────────
+human_size() {
+  local bytes="$1"
+  if   [ "$bytes" -ge 1073741824 ]; then printf "%.1f GB" "$(echo "scale=1; $bytes/1073741824" | bc 2>/dev/null || echo "0")"
+  elif [ "$bytes" -ge 1048576 ];    then printf "%.1f MB" "$(echo "scale=1; $bytes/1048576" | bc 2>/dev/null || echo "0")"
+  elif [ "$bytes" -ge 1024 ];       then printf "%.1f KB" "$(echo "scale=1; $bytes/1024" | bc 2>/dev/null || echo "0")"
+  else printf "%d B" "$bytes"
+  fi
+}
+
+dir_size_bytes() {
+  local dir="$1"
+  [ -d "$dir" ] && du -sb "$dir" 2>/dev/null | awk '{print $1}' || echo "0"
+}
+
+# ── list ─────────────────────────────────────────────────────────────────
+cmd_list() {
+  local shared_total=0
+  local user_total=0
+
+  echo "=== Shared tools (/opt/mise-shared) ==="
+  if [ -d "$SHARED_INSTALLS" ]; then
+    printf "  %-24s %-12s %s\n" "TOOL" "VERSION" "SIZE"
+    printf "  %-24s %-12s %s\n" "────" "───────" "────"
+    for tool_dir in "$SHARED_INSTALLS"/*/; do
+      [ -d "$tool_dir" ] || continue
+      local name; name="$(basename "$tool_dir")"
+      for ver_dir in "$tool_dir"*/; do
+        [ -d "$ver_dir" ] || continue
+        local ver; ver="$(basename "$ver_dir")"
+        local sz; sz="$(dir_size_bytes "$ver_dir")"
+        shared_total=$((shared_total + sz))
+        printf "  %-24s %-12s %s\n" "$name" "$ver" "$(human_size "$sz")"
+      done
+    done
+    echo "  ────────────────────────────────────────────"
+    printf "  %-24s %-12s %s\n" "TOTAL" "" "$(human_size "$shared_total")"
+  else
+    echo "  (no shared tools installed)"
+  fi
+  echo ""
+
+  echo "=== Personal tools (~/.local/share/mise) ==="
+  if [ -d "$USER_INSTALLS" ]; then
+    printf "  %-24s %-12s %s\n" "TOOL" "VERSION" "SIZE"
+    printf "  %-24s %-12s %s\n" "────" "───────" "────"
+    for tool_dir in "$USER_INSTALLS"/*/; do
+      [ -d "$tool_dir" ] || continue
+      local name; name="$(basename "$tool_dir")"
+      for ver_dir in "$tool_dir"*/; do
+        [ -d "$ver_dir" ] || continue
+        local ver; ver="$(basename "$ver_dir")"
+        local sz; sz="$(dir_size_bytes "$ver_dir")"
+        user_total=$((user_total + sz))
+        printf "  %-24s %-12s %s\n" "$name" "$ver" "$(human_size "$sz")"
+      done
+    done
+    echo "  ────────────────────────────────────────────"
+    printf "  %-24s %-12s %s\n" "TOTAL" "" "$(human_size "$user_total")"
+  else
+    echo "  (no personal tools installed)"
+  fi
+  echo ""
+
+  echo "Grand total: $(human_size $((shared_total + user_total)))"
+}
+
+# ── info ─────────────────────────────────────────────────────────────────
+cmd_info() {
+  local tool="$1"
+  [ -n "$tool" ] || die "info requires a tool name"
+
+  local found=0
+
+  # Check shared
+  if [ -d "$SHARED_INSTALLS/$tool" ]; then
+    echo "=== $tool (shared) ==="
+    for ver_dir in "$SHARED_INSTALLS/$tool"/*/; do
+      [ -d "$ver_dir" ] || continue
+      local ver; ver="$(basename "$ver_dir")"
+      local sz; sz="$(dir_size_bytes "$ver_dir")"
+      echo "  version:  $ver"
+      echo "  path:     $ver_dir"
+      echo "  size:     $(human_size "$sz")"
+      # Check if it's in the active mise.toml
+      local mise_toml="/etc/sandbox/mise.toml"
+      [ -f "/work/mise.toml" ] && mise_toml="/work/mise.toml"
+      if [ -f "$mise_toml" ] && grep -q "^${tool}\b\|^\"${tool}\"\b" "$mise_toml" 2>/dev/null; then
+        echo "  source:   declared in mise.toml"
+      else
+        echo "  source:   manually installed (not in active mise.toml)"
+      fi
+    done
+    found=1
+  fi
+
+  # Check personal
+  if [ -d "$USER_INSTALLS/$tool" ]; then
+    echo "=== $tool (personal) ==="
+    for ver_dir in "$USER_INSTALLS/$tool"/*/; do
+      [ -d "$ver_dir" ] || continue
+      local ver; ver="$(basename "$ver_dir")"
+      local sz; sz="$(dir_size_bytes "$ver_dir")"
+      echo "  version:  $ver"
+      echo "  path:     $ver_dir"
+      echo "  size:     $(human_size "$sz")"
+    done
+    found=1
+  fi
+
+  [ "$found" -eq 1 ] || echo "Tool '$tool' is not installed."
+}
+
+# ── clean (personal only) ───────────────────────────────────────────────
+cmd_clean() {
+  local tool="$1"
+  [ -n "$tool" ] || die "clean requires a tool name"
+
+  # Refuse to touch shared volume
+  if [ -d "$SHARED_INSTALLS/$tool" ] && [ ! -d "$USER_INSTALLS/$tool" ]; then
+    echo "Tool '$tool' is only installed in the shared volume and cannot be removed by users." >&2
+    echo "Contact the admin to remove shared tools." >&2
+    exit 1
+  fi
+
+  if [ -d "$USER_INSTALLS/$tool" ]; then
+    local sz; sz="$(dir_size_bytes "$USER_INSTALLS/$tool")"
+    echo "Removing personal install of '$tool' ($(human_size "$sz")) ..."
+    rm -rf "$USER_INSTALLS/$tool"
+    echo "Removed '$tool'. Reclaimed $(human_size "$sz")."
+    # Reshim after removal
+    if command -v mise >/dev/null 2>&1; then
+      mise reshim 2>/dev/null || true
+    fi
+  else
+    echo "Tool '$tool' has no personal install to remove."
+  fi
+}
+
+# ── clean:all (personal only) ───────────────────────────────────────────
+cmd_clean_all() {
+  if [ ! -d "$USER_INSTALLS" ] || [ -z "$(ls -A "$USER_INSTALLS" 2>/dev/null)" ]; then
+    echo "No personal tools to remove."
+    return
+  fi
+
+  local total_sz; total_sz="$(dir_size_bytes "$USER_INSTALLS")"
+  echo "This will remove ALL personal tool installs:"
+  echo "  path: $USER_INSTALLS"
+  echo "  size: $(human_size "$total_sz")"
+  echo ""
+
+  local confirmed=""
+  read -r -p "Are you sure? [y/N] " confirmed
+  case "$confirmed" in
+    [yY][eE][sS]|[yY]) ;;
+    *) echo "Aborted."; return ;;
+  esac
+
+  rm -rf "$USER_INSTALLS"
+  echo "Removed all personal tools. Reclaimed $(human_size "$total_sz")."
+  if command -v mise >/dev/null 2>&1; then
+    mise reshim 2>/dev/null || true
+  fi
+}
+
+# ── volumes ──────────────────────────────────────────────────────────────
+cmd_volumes() {
+  echo "=== Volume mounts ==="
+  echo ""
+
+  # Workspace
+  if [ -d /work ]; then
+    local ws_sz; ws_sz="$(dir_size_bytes /work)"
+    echo "  Workspace (/work)"
+    echo "    mount:    /srv/sandbox/$(id -un) → /work"
+    echo "    size:     $(human_size "$ws_sz")"
+    echo "    backing:  data disk (persistent)"
+  fi
+  echo ""
+
+  # Home
+  local home_sz; home_sz="$(dir_size_bytes "$HOME")"
+  echo "  Home ($HOME)"
+  echo "    mount:    gleiphnir-home-$(id -un) → $HOME"
+  echo "    size:     $(human_size "$home_sz")"
+  echo "    backing:  named volume (persistent)"
+  echo "    contents: ~/.cache, ~/.local, ~/.config, shell history"
+  echo ""
+
+  # Shared mise
+  local mise_sz; mise_sz="$(dir_size_bytes "/opt/mise-shared")"
+  echo "  Shared tools (/opt/mise-shared)"
+  echo "    mount:    sandbox-mise → /opt/mise-shared"
+  echo "    size:     $(human_size "$mise_sz")"
+  echo "    backing:  named volume (shared by all users)"
+  local installs_count=0
+  if [ -d "$SHARED_INSTALLS" ]; then
+    installs_count=$(ls -1d "$SHARED_INSTALLS"/*/ 2>/dev/null | wc -l)
+  fi
+  echo "    tools:    $installs_count tool(s) installed"
+  echo ""
+
+  # Personal mise (if exists)
+  if [ -d "$USER_INSTALLS" ]; then
+    local user_mise_sz; user_mise_sz="$(dir_size_bytes "$USER_INSTALLS")"
+    local user_count=0
+    user_count=$(ls -1d "$USER_INSTALLS"/*/ 2>/dev/null | wc -l)
+    echo "  Personal tools ($USER_INSTALLS)"
+    echo "    size:     $(human_size "$user_mise_sz")"
+    echo "    tools:    $user_count tool(s) installed"
+    echo "    note:     only these can be removed with sandbox-tools clean"
+  fi
+}
+
+# ── main ─────────────────────────────────────────────────────────────────
+SUBCMD=""
+TOOL_NAME=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    list|info|clean|volumes) SUBCMD="$1"; shift ;;
+    clean:all) SUBCMD="clean:all"; shift ;;
+    -h|--help|help|"") usage; exit 0 ;;
+    *)
+      if [ -z "$TOOL_NAME" ]; then
+        TOOL_NAME="$1"; shift
+      else
+        die "unexpected argument: $1"
+      fi
+      ;;
+  esac
+done
+
+[ -n "$SUBCMD" ] || { usage; exit 1; }
+
+case "$SUBCMD" in
+  list)     cmd_list ;;
+  info)     cmd_info "$TOOL_NAME" ;;
+  clean)    cmd_clean "$TOOL_NAME" ;;
+  clean:all) cmd_clean_all ;;
+  volumes)  cmd_volumes ;;
+esac

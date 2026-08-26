@@ -23,9 +23,53 @@ See `README.md` for user-facing docs. This file is for contributors.
     Rootless via `--userns keep-id` (`:rw,U` chowns volumes to the mapped user); rootful `sudo podman` fallback.
   - `sandbox-user` — `useradd -m -s /usr/local/bin/sandbox-shell`, subuid allocation, authorized_keys, workspace dir, `loginctl enable-linger`; on remove also deletes the user's home volume.
   - `sandbox-firewall` — wraps **ufw**: `allow <ip> → tcp/22`, `deny <ip>` (all ports), `remove`, `list`, and `enforce` (deletes the bootstrap any→:22 rule once a real allow-list exists). Rules persist natively via `ufw.service`.
+  - `sandbox-tools` — inspect and manage mise tool installs. Shows all tools (shared + personal) with versions and disk usage. Users can only delete from their personal installs (`~/.local/share/mise`); shared volume tools are protected. Subcommands: `list`, `info <tool>`, `clean <tool>`, `clean:all`, `volumes`.
+  - `sandbox-sbom` — generate Software Bill of Materials for the container image, mise toolchains, and VM apt packages. Uses `syft` when available, falls back to manifest-based SBOM generation. Outputs SPDX 2.3 or CycloneDX 1.5 JSON. Subcommands: `container`, `tools`, `vm`, `all`.
   - `build-container.sh` — podman build + **warm-up**: pre-installs the manifest into `sandbox-mise` so no user ever waits for downloads.
 
 - **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, yazi, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh.
+
+## SBOM (Software Bill of Materials)
+
+`mise run sbom:*` tasks generate SPDX 2.3 or CycloneDX 1.5 JSON SBOMs for all project layers:
+
+| Task | Scope | What it scans |
+|---|---|---|
+| `sbom:container` | Container image | `localhost/sandbox:latest` via syft, or Containerfile + mise.toml manifest |
+| `sbom:tools` | Mise toolchains | `/opt/mise-shared/data/installs/` (shared volume) |
+| `sbom:vm` | VM apt packages | `/var/lib/dpkg/status` (all installed .deb packages) |
+| `sbom:all` | All of the above | Combined output |
+
+SBOMs are generated inside the VM via `sandbox-sbom` and copied to the host `sbom/` directory. The `syft` tool (host-side) is used when available; a fallback manifest-based generator handles offline or missing-syft scenarios.
+
+## Dotfiles
+
+Sandbox dotfiles ship from `/etc/sandbox/dotfiles/` inside the container image:
+
+| File | Target | Purpose |
+|---|---|---|
+| `bashrc` | `~/.bashrc` | mise activation, atuin, carapace, audit journal, prompt |
+| `profile.ps1` | `~/.config/powershell/profile.ps1` | Same for pwsh |
+| `gitconfig` | `~/.gitconfig` | delta pager, hunk aliases, diff3 merge |
+| `gitignore_global` | `~/.gitignore_global` | Global gitignore (OS, editor, language artifacts) |
+| `inputrc` | `~/.inputrc` | readline config (case-insensitive completion, arrow-key history search) |
+| `editorconfig` | `~/.editorconfig` | Editor defaults (UTF-8, LF, indent style per language) |
+
+**Personalization**: run `mise run dotfiles:init` to scaffold `/work/dotfiles/` with editable copies. Files there override the defaults. The `dotfiles` task re-links on every container start.
+
+## Volume tooling
+
+`sandbox-tools` (inside containers) and `mise run tools:*` (host-side) provide visibility into mise tool installs:
+
+| Command | Description |
+|---|---|
+| `sandbox-tools list` | List all tools (shared + personal) with versions and disk usage |
+| `sandbox-tools info <tool>` | Detailed info: version, path, size, source (shared/personal) |
+| `sandbox-tools clean <tool>` | Remove a personal install (shared tools are protected) |
+| `sandbox-tools clean:all` | Remove all personal installs (with confirmation) |
+| `sandbox-tools volumes` | Show volume mounts, disk usage, and tool counts |
+
+Host-side convenience tasks: `mise run tools:list`, `mise run tools:info TOOL=...`, `mise run tools:clean TOOL=...`, `mise run tools:volumes`.
 
 ## Networking modes
 
@@ -55,8 +99,8 @@ See `README.md` for user-facing docs. This file is for contributors.
 
 - Packer golden image (optional, faster boot).
 - CSI-like separate RW data drive per org (vs per-user subdirs).
-- ~~Auditing/logging (systemd journal → host, podman events).~~ **Done: see `docs/observability.md`.**
 - gVisor/Kata Containers instead of Podman for stronger container isolation.
+- SBOM diffing / drift detection (compare SBOMs across builds to catch supply chain changes).
 
 ## Observability (optional)
 

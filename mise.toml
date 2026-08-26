@@ -6,6 +6,7 @@
 [tools]
 opencode = "latest"
 powershell = "latest"
+syft = "latest"            # SBOM generation (SPDX + CycloneDX)
 # mise itself is the only hard host requirement (plus pwsh + qemu, checked by `mise run deps`)
 
 [settings]
@@ -139,6 +140,44 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-bui
 [tasks.'container:info']
 description = "Show container image info from inside the VM"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-info.ps1'"
+
+# ── SBOM (Software Bill of Materials) ──────────────────────────────────────
+[tasks.'sbom:container']
+description = "Generate SBOM for the sandbox container image"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/sbom.ps1' container"
+
+[tasks.'sbom:tools']
+description = "Generate SBOM for installed mise toolchains"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/sbom.ps1' tools"
+
+[tasks.'sbom:vm']
+description = "Generate SBOM for VM apt packages"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/sbom.ps1' vm"
+
+[tasks.'sbom:all']
+description = "Generate all SBOMs (container + tools + VM)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/sbom.ps1' all"
+
+# ── volume tools (inspect / manage mise installs) ──────────────────────────
+[tasks.'tools:list']
+description = "List all installed mise tools (shared + personal) with disk usage"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' list"
+
+[tasks.'tools:info']
+description = "Show details for a specific tool: mise run tools:info TOOL=ripgrep"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' info"
+
+[tasks.'tools:clean']
+description = "Remove a personal tool install: mise run tools:clean TOOL=ripgrep"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' clean"
+
+[tasks.'tools:clean:all']
+description = "Remove all personal tool installs (prompts for confirmation)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' clean:all"
+
+[tasks.'tools:volumes']
+description = "Show volume mount info and disk usage inside the VM"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' volumes"
 
 # ── observability (Grafana LGTM) ───────────────────────────────────────────
 [tasks.'obs:start']

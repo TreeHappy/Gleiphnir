@@ -100,6 +100,21 @@ __PROFILE_PS1_CONTENT__
     content: |
 __GITCONFIG_CONTENT__
 
+  - path: /opt/sandbox/container/files/dotfiles/gitignore_global
+    permissions: '0644'
+    content: |
+__GITIGNORE_GLOBAL_CONTENT__
+
+  - path: /opt/sandbox/container/files/dotfiles/inputrc
+    permissions: '0644'
+    content: |
+__INPUTRC_CONTENT__
+
+  - path: /opt/sandbox/container/files/dotfiles/editorconfig
+    permissions: '0644'
+    content: |
+__EDITORCONFIG_CONTENT__
+
   # pwsh launcher (bash script that resolves the mise-installed pwsh)
   - path: /opt/sandbox/container/files/start-pwsh.sh
     permissions: '0755'
@@ -130,6 +145,18 @@ __SANDBOX_SECRETS_CONTENT__
     permissions: '0755'
     content: |
 __SANDBOX_JOURNAL_CONTENT__
+
+  # SBOM generator (container image + mise tools + VM apt packages)
+  - path: /usr/local/bin/sandbox-sbom
+    permissions: '0755'
+    content: |
+__SANDBOX_SBOM_CONTENT__
+
+  # Volume inspection tool (mise tool installs + disk usage)
+  - path: /usr/local/bin/sandbox-tools
+    permissions: '0755'
+    content: |
+__SANDBOX_TOOLS_CONTENT__
 
   # OTel Collector config (deployed by deploy-observability.ps1 at runtime)
   # Placeholder — actual config is deployed via SSH after VM boot

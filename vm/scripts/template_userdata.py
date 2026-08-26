@@ -25,11 +25,16 @@ def main() -> int:
         "__BASHRC_CONTENT__": f"{repo}/container/files/dotfiles/bashrc",
         "__PROFILE_PS1_CONTENT__": f"{repo}/container/files/dotfiles/profile.ps1",
         "__GITCONFIG_CONTENT__": f"{repo}/container/files/dotfiles/gitconfig",
+        "__GITIGNORE_GLOBAL_CONTENT__": f"{repo}/container/files/dotfiles/gitignore_global",
+        "__INPUTRC_CONTENT__": f"{repo}/container/files/dotfiles/inputrc",
+        "__EDITORCONFIG_CONTENT__": f"{repo}/container/files/dotfiles/editorconfig",
         "__START_PWSH_CONTENT__": f"{repo}/container/files/start-pwsh.sh",
         "__SESSION_LOGGER_CONTENT__": f"{repo}/vm/guest/bin/sandbox-session-logger",
         "__SANDBOX_PROXY_CONTENT__": f"{repo}/vm/guest/bin/sandbox-proxy",
         "__SANDBOX_SECRETS_CONTENT__": f"{repo}/vm/guest/bin/sandbox-secrets",
         "__SANDBOX_JOURNAL_CONTENT__": f"{repo}/vm/guest/bin/sandbox-journal",
+        "__SANDBOX_SBOM_CONTENT__": f"{repo}/vm/guest/bin/sandbox-sbom",
+        "__SANDBOX_TOOLS_CONTENT__": f"{repo}/vm/guest/bin/sandbox-tools",
     }
 
     p = pathlib.Path(tmpdir) / "user-data"

@@ -1,0 +1,59 @@
+# Global gitignore for Gleiphnir sandboxes
+# Applied via: git config --global core.excludesfile ~/.gitignore_global
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor swap / backup / undo files
+*.swp
+*.swo
+*~
+*.bak
+\#*\#
+.#*
+
+# IDE / editor project dirs
+.vscode/
+.idea/
+*.code-workspace
+.project
+.classpath
+.settings/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Go
+/vendor/
+
+# Rust
+/target/
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Containers
+.podman/

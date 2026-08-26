@@ -44,7 +44,7 @@ jobs = 4
 # Ships the sandbox shell configs into $HOME. Idempotent; re-run any time.
 # Personal override: drop same-named files into /work/dotfiles/ — they win.
 [tasks.dotfiles]
-description = "Link sandbox dotfiles into $HOME (bashrc, pwsh profile, gitconfig)"
+description = "Link sandbox dotfiles into $HOME (bashrc, pwsh profile, gitconfig, gitignore_global, inputrc, editorconfig)"
 run = '''
 set -e
 SRC="/etc/sandbox/dotfiles"
@@ -60,8 +60,43 @@ link() {  # link <source> <target>
   fi
 }
 
-link "$SRC/bashrc"      "$HOME/.bashrc"
-link "$SRC/profile.ps1" "$HOME/.config/powershell/profile.ps1"
-link "$SRC/gitconfig"   "$HOME/.gitconfig"
+link "$SRC/bashrc"           "$HOME/.bashrc"
+link "$SRC/profile.ps1"      "$HOME/.config/powershell/profile.ps1"
+link "$SRC/gitconfig"        "$HOME/.gitconfig"
+link "$SRC/gitignore_global" "$HOME/.gitignore_global"
+link "$SRC/inputrc"          "$HOME/.inputrc"
+link "$SRC/editorconfig"     "$HOME/.editorconfig"
+
+# Configure git to use the global gitignore
+if command -v git >/dev/null 2>&1; then
+  git config --global core.excludesfile ~/.gitignore_global 2>/dev/null || true
+fi
+
 echo "[sandbox] dotfiles linked."
+'''
+
+# ── dotfiles:init ─────────────────────────────────────────────────────────
+# Scaffold /work/dotfiles/ with copies of all default dotfiles.
+# Users edit these in-place; they take precedence over /etc/sandbox/dotfiles/.
+[tasks.'dotfiles:init']
+description = "Scaffold /work/dotfiles/ with editable copies of all default dotfiles"
+run = '''
+set -e
+SRC="/etc/sandbox/dotfiles"
+DST="/work/dotfiles"
+mkdir -p "$DST"
+
+for f in bashrc profile.ps1 gitconfig gitignore_global inputrc editorconfig; do
+  if [ ! -f "$DST/$f" ]; then
+    cp "$SRC/$f" "$DST/$f"
+    echo "  created $DST/$f"
+  else
+    echo "  exists  $DST/$f (skipped)"
+  fi
+done
+
+echo ""
+echo "[sandbox] dotfiles scaffolded in $DST"
+echo "  Edit files there — they override /etc/sandbox/dotfiles/ on next shell start."
+echo "  Run 'mise run dotfiles' to re-link without restarting."
 '''

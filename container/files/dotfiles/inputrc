@@ -1,0 +1,16 @@
+# Readline configuration for Gleiphnir sandboxes
+# Loaded by bash and any readline-based tool (python, gh, etc.)
+
+# Completion
+set completion-ignore-case on
+set show-all-if-ambiguous on
+set colored-stats on
+set visible-stats on
+set mark-symlinked-directories on
+
+# History search with arrow keys
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+
+# Edit with $EDITOR on Ctrl-x Ctrl-e
+"\C-x\C-e": vi-editing-mode

@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-sbom — generate Software Bill of Materials for Gleiphnir
+# Runs inside the VM. Produces SPDX or CycloneDX SBOMs for the container image,
+# installed mise toolchains, and VM apt packages.
+set -euo pipefail
+
+OUTPUT_DIR="/work/sbom"
+DEFAULT_FORMAT="spdx-json"
+
+usage() {
+  cat <<'USAGE'
+sandbox-sbom — generate Software Bill of Materials
+
+Usage:
+  sandbox-sbom container [--format FMT] [--output DIR]   SBOM for the container image
+  sandbox-sbom tools     [--format FMT] [--output DIR]   SBOM for installed mise tools
+  sandbox-sbom vm        [--format FMT] [--output DIR]   SBOM for VM apt packages
+  sandbox-sbom all       [--format FMT] [--output DIR]   Generate all SBOMs
+
+Formats:
+  spdx-json   SPDX 2.3 JSON (default)
+  cyclonedx   CycloneDX 1.5 JSON
+
+Output defaults to /work/sbom/. Files are named:
+  <scope>-<timestamp>.<ext>
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+ensure_syft() {
+  if ! command -v syft >/dev/null 2>&1; then
+    echo "[sandbox-sbom] syft not found on PATH. Install with: mise use syft@latest" >&2
+    echo "               Falling back to manifest-based SBOM generation." >&2
+    return 1
+  fi
+  return 0
+}
+
+format_ext() {
+  case "$1" in
+    spdx-json)  echo "spdx.json" ;;
+    cyclonedx)  echo "cdx.json"  ;;
+    *)          echo "json"       ;;
+  esac
+}
+
+format_flag() {
+  case "$1" in
+    spdx-json)  echo "spdx-json" ;;
+    cyclonedx)  echo "cyclonedx-json" ;;
+    *)          echo "spdx-json" ;;
+  esac
+}
+
+ts() { date -u +%Y%m%d-%H%M%S; }
+
+# ── container image SBOM ─────────────────────────────────────────────────
+sbom_container() {
+  local fmt="$1" out="$2"
+  local img="${CONTAINER_IMAGE:-localhost/sandbox:latest}"
+  local ext; ext="$(format_ext "$fmt")"
+  local flag; flag="$(format_flag "$fmt")"
+  local outfile="${out}/container-$(ts).${ext}"
+
+  echo "[sandbox-sbom] Generating container image SBOM ($img) ..."
+
+  if ensure_syft; then
+    syft "$img" -o "$flag=$outfile" 2>&1 | sed 's/^/[syft] /'
+  else
+    # Fallback: produce a manifest SBOM from the Containerfile + mise.toml
+    generate_container_manifest "$outfile" "$fmt"
+  fi
+
+  echo "[sandbox-sbom] Container SBOM: $outfile"
+}
+
+generate_container_manifest() {
+  local outfile="$1" fmt="$2"
+  local container_dir="/opt/sandbox/container"
+  local mise_toml="/etc/sandbox/mise.toml"
+  local timestamp; timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # Parse tools from mise.toml
+  local tools_json="[]"
+  if [ -f "$mise_toml" ]; then
+    tools_json=$(jq -Rn '
+      [inputs | select(startswith("[") | not) | select(split("=") | length == 2) |
+       {name: (split("=")[0] | gsub("^\\s+|\\s+$";"")),
+        version: (split("=")[1] | gsub("^\\s+|\\s+$";"") | gsub("^\"|\"$";""))}]
+    ' < <(sed -n '/^\[tools\]/,/^\[/p' "$mise_toml" | grep -v '^\[' | grep -v '^\s*$') 2>/dev/null || echo "[]")
+  fi
+
+  # Parse apt packages from Containerfile
+  local apt_packages="[]"
+  if [ -f "$container_dir/Containerfile" ]; then
+    apt_packages=$(grep -oP 'apt-get install.*?--no-install-recommends\s*\\?\s*\K\S+' "$container_dir/Containerfile" 2>/dev/null \
+      | grep -v '^-' | grep -v '^\s*$' | jq -R . | jq -s . 2>/dev/null || echo "[]")
+  fi
+
+  if [ "$fmt" = "cyclonedx" ]; then
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson tools "$tools_json" \
+      --argjson apt "$apt_packages" \
+      '{
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+          "timestamp": $ts,
+          "component": {"name": "gleiphnir-sandbox", "type": "application"}
+        },
+        "components": (
+          [$apt[] | {
+            "type": "library",
+            "name": .,
+            "version": "unknown",
+            "description": "apt package from Containerfile"
+          }] +
+          [$tools[] | {
+            "type": "library",
+            "name": .name,
+            "version": .version,
+            "description": "mise toolchain"
+          }]
+        )
+      }' > "$outfile"
+  else
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson tools "$tools_json" \
+      --argjson apt "$apt_packages" \
+      '{
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "gleiphnir-sandbox",
+        "documentNamespace": "https://gleiphnir.dev/sbom/sandbox",
+        "creationInfo": {"created": $ts, "creators": ["Tool: sandbox-sbom"]},
+        "packages": (
+          [$apt[] | {
+            "SPDXID": ("SPDXRef-apt-" + .),
+            "name": .,
+            "versionInfo": "unknown",
+            "downloadLocation": "https://packages.ubuntu.com",
+            "filesAnalyzed": false
+          }] +
+          [$tools[] | {
+            "SPDXID": ("SPDXRef-mise-" + .name),
+            "name": .name,
+            "versionInfo": .version,
+            "downloadLocation": "https://mise.run",
+            "filesAnalyzed": false
+          }]
+        )
+      }' > "$outfile"
+  fi
+}
+
+# ── mise toolchains SBOM ─────────────────────────────────────────────────
+sbom_tools() {
+  local fmt="$1" out="$2"
+  local ext; ext="$(format_ext "$fmt")"
+  local flag; flag="$(format_flag "$fmt")"
+  local outfile="${out}/tools-$(ts).${ext}"
+  local data_dir="${MISE_DATA_DIR:-/opt/mise-shared/data}"
+
+  echo "[sandbox-sbom] Generating mise toolchains SBOM ..."
+
+  if ensure_syft; then
+    # Scan installed tool directories
+    if [ -d "$data_dir/installs" ]; then
+      syft "dir:$data_dir/installs" -o "$flag=$outfile" 2>&1 | sed 's/^/[syft] /'
+    else
+      echo "[sandbox-sbom] No installs directory found at $data_dir/installs" >&2
+      generate_tools_manifest "$outfile" "$fmt"
+    fi
+  else
+    generate_tools_manifest "$outfile" "$fmt"
+  fi
+
+  echo "[sandbox-sbom] Tools SBOM: $outfile"
+}
+
+generate_tools_manifest() {
+  local outfile="$1" fmt="$2"
+  local data_dir="${MISE_DATA_DIR:-/opt/mise-shared/data}"
+  local timestamp; timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # Enumerate installed tools from mise data directory
+  local tools="[]"
+  if [ -d "$data_dir/installs" ]; then
+    tools=$(for tool_dir in "$data_dir/installs"/*/; do
+      [ -d "$tool_dir" ] || continue
+      local name; name="$(basename "$tool_dir")"
+      for ver_dir in "$tool_dir"*/; do
+        [ -d "$ver_dir" ] || continue
+        local ver; ver="$(basename "$ver_dir")"
+        echo "{\"name\":\"$name\",\"version\":\"$ver\",\"path\":\"$ver_dir\"}"
+      done
+    done | jq -s . 2>/dev/null || echo "[]")
+  fi
+
+  if [ "$fmt" = "cyclonedx" ]; then
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson tools "$tools" \
+      '{
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+          "timestamp": $ts,
+          "component": {"name": "gleiphnir-mise-tools", "type": "application"}
+        },
+        "components": [$tools[] | {
+          "type": "library",
+          "name": .name,
+          "version": .version,
+          "description": "mise toolchain (shared volume)"
+        }]
+      }' > "$outfile"
+  else
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson tools "$tools" \
+      '{
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "gleiphnir-mise-tools",
+        "documentNamespace": "https://gleiphnir.dev/sbom/mise-tools",
+        "creationInfo": {"created": $ts, "creators": ["Tool: sandbox-sbom"]},
+        "packages": [$tools[] | {
+          "SPDXID": ("SPDXRef-" + .name + "-" + .version),
+          "name": .name,
+          "versionInfo": .version,
+          "downloadLocation": "https://mise.run",
+          "filesAnalyzed": false
+        }]
+      }' > "$outfile"
+  fi
+}
+
+# ── VM apt packages SBOM ─────────────────────────────────────────────────
+sbom_vm() {
+  local fmt="$1" out="$2"
+  local ext; ext="$(format_ext "$fmt")"
+  local flag; flag="$(format_flag "$fmt")"
+  local outfile="${out}/vm-$(ts).${ext}"
+
+  echo "[sandbox-sbom] Generating VM apt packages SBOM ..."
+
+  if ensure_syft; then
+    # syft can scan dpkg status directly
+    syft "dir:/var/lib/dpkg" -o "$flag=$outfile" 2>&1 | sed 's/^/[syft] /'
+  else
+    generate_vm_manifest "$outfile" "$fmt"
+  fi
+
+  echo "[sandbox-sbom] VM SBOM: $outfile"
+}
+
+generate_vm_manifest() {
+  local outfile="$1" fmt="$2"
+  local timestamp; timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # Parse dpkg status for installed packages
+  local packages="[]"
+  if [ -f /var/lib/dpkg/status ]; then
+    packages=$(awk '
+      /^Package:/ { pkg = substr($0, 10) }
+      /^Version:/ { ver = substr($0, 10) }
+      /^Status:/ && /install ok installed/ { printf "{\"name\":\"%s\",\"version\":\"%s\"}\n", pkg, ver }
+    ' /var/lib/dpkg/status | jq -s . 2>/dev/null || echo "[]")
+  fi
+
+  if [ "$fmt" = "cyclonedx" ]; then
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson pkgs "$packages" \
+      '{
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+          "timestamp": $ts,
+          "component": {"name": "gleiphnir-vm", "type": "application"}
+        },
+        "components": [$pkgs[] | {
+          "type": "library",
+          "name": .name,
+          "version": .version,
+          "description": "VM apt package"
+        }]
+      }' > "$outfile"
+  else
+    jq -n \
+      --arg ts "$timestamp" \
+      --argjson pkgs "$packages" \
+      '{
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "gleiphnir-vm",
+        "documentNamespace": "https://gleiphnir.dev/sbom/vm",
+        "creationInfo": {"created": $ts, "creators": ["Tool: sandbox-sbom"]},
+        "packages": [$pkgs[] | {
+          "SPDXID": ("SPDXRef-" + .name),
+          "name": .name,
+          "versionInfo": .version,
+          "downloadLocation": "https://packages.ubuntu.com",
+          "filesAnalyzed": false
+        }]
+      }' > "$outfile"
+  fi
+}
+
+# ── main ─────────────────────────────────────────────────────────────────
+FMT="$DEFAULT_FORMAT"
+OUT="$OUTPUT_DIR"
+SUBCMD=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    container|tools|vm|all) SUBCMD="$1"; shift ;;
+    --format)   FMT="$2"; shift 2 ;;
+    --output)   OUT="$2"; shift 2 ;;
+    -h|--help)  usage; exit 0 ;;
+    *)          die "unknown argument: $1 (see --help)" ;;
+  esac
+done
+
+[ -n "$SUBCMD" ] || { usage; exit 1; }
+
+mkdir -p "$OUT" 2>/dev/null || true
+
+case "$SUBCMD" in
+  container) sbom_container "$FMT" "$OUT" ;;
+  tools)     sbom_tools "$FMT" "$OUT" ;;
+  vm)        sbom_vm "$FMT" "$OUT" ;;
+  all)
+    sbom_container "$FMT" "$OUT"
+    sbom_tools "$FMT" "$OUT"
+    sbom_vm "$FMT" "$OUT"
+    echo ""
+    echo "[sandbox-sbom] All SBOMs generated in $OUT"
+    ls -la "$OUT"
+    ;;
+esac

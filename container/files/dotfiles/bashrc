@@ -98,7 +98,9 @@ if [ -t 1 ] && [ ! -f /work/.sandbox-welcomed ]; then
 │ Shared tools volume:   /opt/mise-shared  (downloads once for all) │
 │ Default shell: pwsh · Editor: nvim · Diff pager: delta            │
 │ Tools via mise:        mise use node@lts / python@3.12 ...        │
+│ Inspect tools:         sandbox-tools list / info / volumes        │
 │ Audit journal:         sandbox-journal (query command history)     │
+│ Personalize dotfiles:  mise run dotfiles:init (scaffold /work/dotfiles/) │
 └───────────────────────────────────────────────────────────────────┘
 WELCOME
   touch /work/.sandbox-welcomed 2>/dev/null || true
