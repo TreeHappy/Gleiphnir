@@ -1,0 +1,542 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-policy — network egress/ingress policy engine (like `sbx policy`)
+# Manages domain allowlists (via sandbox-proxy) + IP/CIDR via ufw.
+# Presets: open / balanced / locked (seeded from Docker Sandbox Balanced baseline + exa.ai + package-managers/github)
+# Per-sandbox scoping via JSON store; proxy enforcement reads allowlist file.
+set -euo pipefail
+
+POLICY_DIR="/var/lib/sandbox"
+POLICY_FILE="$POLICY_DIR/policy.json"
+PRESET_DIR="/etc/sandbox/policy-presets"
+PROXY_ALLOWLIST="/etc/sandbox/proxy-allowlist.txt"
+UFW_BIN="/usr/sbin/ufw"
+
+# defaults
+DEFAULT_PRESET="balanced"
+
+die() { echo "error: $*" >&2; exit 1; }
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then echo "sandbox-policy must be run as root (use sudo)" >&2; exit 1; fi
+}
+
+ensure_dirs() {
+  mkdir -p "$POLICY_DIR" 2>/dev/null || true
+  mkdir -p "$(dirname "$PROXY_ALLOWLIST")" 2>/dev/null || true
+  mkdir -p "$PRESET_DIR" 2>/dev/null || true
+}
+
+init_policy_file() {
+  if [ ! -f "$POLICY_FILE" ]; then
+    cat > "$POLICY_FILE" <<JSON
+{
+  "version": 1,
+  "preset": "$DEFAULT_PRESET",
+  "global": {"allow": [], "deny": []},
+  "sandboxes": {},
+  "rules": []
+}
+JSON
+    chmod 600 "$POLICY_FILE" 2>/dev/null || true
+  fi
+}
+
+load_preset_domains() {
+  local preset="$1"
+  local preset_file="$PRESET_DIR/${preset}.txt"
+  if [ -f "$preset_file" ]; then
+    cat "$preset_file"
+  elif [ -f "$PRESET_DIR/${preset}.yaml" ]; then
+    # yaml simple list extraction
+    grep -E "^\s*-\s*" "$PRESET_DIR/${preset}.yaml" | sed 's/^\s*-\s*//' | tr -d '"' | tr -d "'"
+  else
+    # fallback balanced embedded
+    case "$preset" in
+      balanced) cat <<'EOF'
+github.com
+*.github.com
+githubusercontent.com
+*.githubusercontent.com
+api.github.com
+codeload.github.com
+raw.githubusercontent.com
+ghcr.io
+*.ghcr.io
+gitlab.com
+*.gitlab.com
+bitbucket.org
+*.bitbucket.org
+registry.npmjs.org
+*.npmjs.org
+*.npmjs.com
+registry.yarnpkg.com
+nodejs.org
+pypi.org
+*.pypi.org
+files.pythonhosted.org
+*.pythonhosted.org
+crates.io
+*.crates.io
+static.crates.io
+proxy.golang.org
+*.golang.org
+sum.golang.org
+go.googlesource.com
+nuget.org
+*.nuget.org
+api.nuget.org
+repo1.maven.org
+repo.maven.apache.org
+central.sonatype.com
+rubygems.org
+*.rubygems.org
+repo.packagist.org
+deb.debian.org
+security.debian.org
+archive.ubuntu.com
+security.ubuntu.com
+ppa.launchpad.net
+mise.run
+*.mise.run
+mise.jdx.dev
+docker.io
+*.docker.io
+registry-1.docker.io
+gcr.io
+*.gcr.io
+quay.io
+*.quay.io
+marketplace.visualstudio.com
+*.vscode-cdn.net
+*.blob.core.windows.net
+dhi.io
+api.openai.com
+api.anthropic.com
+*.anthropic.com
+api.exa.ai
+*.exa.ai
+exa.ai
+*.exa.com
+EOF
+        ;;
+      open) echo "**" ;;
+      locked) echo "" ;;
+      *) echo "" ;;
+    esac
+  fi
+}
+
+# wildcard match: pattern may be "**", "*.host", "host", "host:port", "*.host:port"
+# host to check is plain hostname (lowercase, no port)
+domain_matches() {
+  local pattern="$1"
+  local host="$2"
+  # strip port from pattern if :port present
+  local pat_host="${pattern%%:*}"
+  local pat_port="${pattern#*:}"
+  if [ "$pat_host" = "$pattern" ]; then pat_port=""; fi
+  # normalize
+  pat_host="$(echo "$pat_host" | tr '[:upper:]' '[:lower:]')"
+  host="$(echo "$host" | tr '[:upper:]' '[:lower:]')"
+  if [ "$pat_host" = "**" ] || [ "$pat_host" = "*" ]; then return 0; fi
+  if [ "$pat_host" = "$host" ]; then return 0; fi
+  # *.example.com matches example.com + any subdomain? Docker: *. does NOT match root, need both. We implement permissive: *. matches subdomains only, but also check root if pattern is *.example.com and host==example.com -> also match for usability
+  if [[ "$pat_host" == \*.* ]]; then
+    local suffix="${pat_host#\*.}"
+    if [ "$host" = "$suffix" ]; then return 0; fi
+    if [[ "$host" == *".${suffix}" ]]; then return 0; fi
+  fi
+  if [[ "$pat_host" == \*\*.* ]]; then
+    local suffix="${pat_host#\*\*.}"
+    if [ "$host" = "$suffix" ]; then return 0; fi
+    if [[ "$host" == *".${suffix}" ]]; then return 0; fi
+  fi
+  return 1
+}
+
+is_ip_or_cidr() {
+  local r="$1"
+  # strip :port
+  r="${r%%:*}"
+  if [[ "$r" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then return 0; fi
+  if [[ "$r" =~ ^[0-9a-fA-F:]+(/[0-9]+)?$ ]] && [[ "$r" == *:* ]]; then return 0; fi
+  return 1
+}
+
+sync_proxy_allowlist() {
+  # rebuild allowlist from preset + global allows minus denies? simplified: union of preset domains + global allow, if open -> "**"
+  local preset
+  preset="$(jq -r '.preset // "balanced"' "$POLICY_FILE" 2>/dev/null || echo "balanced")"
+  local tmp; tmp="$(mktemp)"
+  if [ "$preset" = "open" ]; then
+    echo "**" > "$tmp"
+  elif [ "$preset" = "locked" ]; then
+    # only global allows
+    jq -r '.global.allow[]?' "$POLICY_FILE" 2>/dev/null > "$tmp" || true
+  else
+    load_preset_domains "$preset" > "$tmp" || true
+    # append global allows
+    jq -r '.global.allow[]?' "$POLICY_FILE" 2>/dev/null >> "$tmp" || true
+  fi
+  # remove denied? For proxy we keep deny separate via check, but allowlist file only for allows; deny evaluated first in check
+  sort -u "$tmp" -o "$PROXY_ALLOWLIST" 2>/dev/null || true
+  rm -f "$tmp" 2>/dev/null || true
+  chmod 644 "$PROXY_ALLOWLIST" 2>/dev/null || true
+  # signal proxy to reload if running
+  if pgrep -x mitmdump >/dev/null 2>&1; then
+    pkill -HUP mitmdump 2>/dev/null || true
+  fi
+}
+
+cmd_init() {
+  require_root; ensure_dirs; init_policy_file
+  local preset="${1:-}"
+  if [ -z "$preset" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      echo "Initialize the global network policy for your sandboxes:"
+      echo ""
+      echo "  Applies to all sandboxes (global) + per-sandbox overrides."
+      echo "  1. Open        — All outbound traffic allowed (allow **)"
+      echo "  2. Balanced   — Default deny, common dev sites allowed (npm, pypi, github, exa.ai, etc.)"
+      echo "  3. Locked Down — All outbound blocked (even model APIs)"
+      echo ""
+      read -r -p "Choose preset [2]: " preset_choice
+      case "$preset_choice" in
+        1|open|Open) preset="open" ;;
+        3|locked|Locked) preset="locked" ;;
+        *) preset="balanced" ;;
+      esac
+    else
+      preset="balanced"
+    fi
+  fi
+  case "$preset" in
+    allow-all|open) preset="open" ;;
+    balanced) preset="balanced" ;;
+    deny-all|locked) preset="locked" ;;
+    *) die "unknown preset: $preset (expected open|balanced|locked)" ;;
+  esac
+  echo "Initializing policy preset: $preset"
+  # update JSON
+  tmp="$(mktemp)"
+  jq --arg p "$preset" '.preset = $p' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+  chmod 600 "$POLICY_FILE" 2>/dev/null || true
+  sync_proxy_allowlist
+  # ufw posture for egress: if locked/balanced deny outgoing, open allow outgoing
+  if [ -x "$UFW_BIN" ]; then
+    if [ "$preset" = "open" ]; then
+      "$UFW_BIN" default allow outgoing >/dev/null 2>&1 || true
+      echo "ufw default allow outgoing"
+    else
+      "$UFW_BIN" default deny outgoing >/dev/null 2>&1 || true
+      # ensure DNS and loopback still works: allow out 53/tcp+udp, 80,443 to preset domains? For now allow DNS globally
+      "$UFW_BIN" allow out 53 >/dev/null 2>&1 || true
+      "$UFW_BIN" allow out 80 >/dev/null 2>&1 || true
+      "$UFW_BIN" allow out 443 >/dev/null 2>&1 || true
+      echo "ufw default deny outgoing (allow 53,80,443 for preset domains)"
+    fi
+    "$UFW_BIN" --force enable >/dev/null 2>&1 || true
+  fi
+  echo "Policy preset $preset active."
+  sync_proxy_allowlist
+}
+
+cmd_ls() {
+  ensure_dirs; init_policy_file
+  local wide=0 json=0 sandbox=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --wide) wide=1; shift ;;
+      --json) json=1; shift ;;
+      --sandbox) sandbox="$2"; shift 2 ;;
+      --include-inactive) shift ;; # compat stub
+      *) shift ;;
+    esac
+  done
+  if [ "$json" = "1" ]; then cat "$POLICY_FILE"; return; fi
+  local preset; preset="$(jq -r '.preset' "$POLICY_FILE" 2>/dev/null || echo "?")"
+  echo "POLICY           SOURCE   APPLIES TO          SUMMARY"
+  # global
+  local allow_cnt deny_cnt
+  allow_cnt="$(jq '.global.allow | length' "$POLICY_FILE" 2>/dev/null || echo 0)"
+  deny_cnt="$(jq '.global.deny | length' "$POLICY_FILE" 2>/dev/null || echo 0)"
+  # preset domains count
+  local preset_cnt; preset_cnt="$(load_preset_domains "$preset" | grep -v '^$' | wc -l | tr -d ' ')"
+  printf "%-16s %-8s %-19s %s\n" "local-policy" "local" "all" "network: $preset_cnt preset ($preset) + $allow_cnt allow, $deny_cnt deny"
+  if [ "$wide" = "1" ]; then
+    echo ""
+    echo "Preset: $preset"
+    load_preset_domains "$preset" | sed 's/^/  allow ** preset: /' | head -100
+    echo ""
+    echo "Global allows:"
+    jq -r '.global.allow[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  allow /' || echo "  (none)"
+    echo "Global denies:"
+    jq -r '.global.deny[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  deny  /' || echo "  (none)"
+    if [ -n "$sandbox" ]; then
+      echo ""
+      echo "Sandbox $sandbox:"
+      jq -r --arg s "$sandbox" '.sandboxes[$s].allow[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  allow /' || echo "  (none)"
+      jq -r --arg s "$sandbox" '.sandboxes[$s].deny[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  deny  /' || echo "  (none)"
+    else
+      if jq -e '.sandboxes | length >0' "$POLICY_FILE" >/dev/null 2>&1; then
+        echo ""
+        for sb in $(jq -r '.sandboxes | keys[]?' "$POLICY_FILE" 2>/dev/null); do
+          echo "Sandbox $sb:"
+          jq -r --arg s "$sb" '.sandboxes[$s].allow[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  allow /' || echo "  (none)"
+          jq -r --arg s "$sb" '.sandboxes[$s].deny[]?' "$POLICY_FILE" 2>/dev/null | sed 's/^/  deny  /' || echo "  (none)"
+        done
+      fi
+    fi
+    echo ""
+    echo "Proxy allowlist: $PROXY_ALLOWLIST ($(wc -l < "$PROXY_ALLOWLIST" 2>/dev/null || echo 0) entries)"
+    echo "UFW status:"
+    if [ -x "$UFW_BIN" ]; then "$UFW_BIN" status verbose 2>/dev/null | sed 's/^/  /' || echo "  (ufw not active)"; else echo "  ufw not found"; fi
+  fi
+}
+
+cmd_allow() {
+  require_root; ensure_dirs; init_policy_file
+  local type="${1:-}"; shift || true
+  if [ "$type" != "network" ] && [ "$type" != "fs" ]; then echo "error: only network supported, got $type" >&2; exit 1; fi
+  local resource="${1:-}"; [ -n "$resource" ] || die "allow requires resource"
+  shift || true
+  local sandbox="" port=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sandbox) sandbox="$2"; shift 2 ;;
+      --port) port="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  local full="$resource"
+  if [ -n "$port" ]; then full="${resource}:${port}"; fi
+  if [ -n "$sandbox" ]; then
+    tmp="$(mktemp)"; jq --arg s "$sandbox" --arg r "$full" '.sandboxes[$s] //= {"allow":[],"deny":[]} | .sandboxes[$s].allow += [$r] | .sandboxes[$s].allow |= unique' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+    echo "Allowed $full for sandbox $sandbox"
+  else
+    # dedup deny if present? allow after deny? we keep both but check deny precedence
+    if is_ip_or_cidr "$resource"; then
+      echo "Adding ufw allow for IP/CIDR $resource ..."
+      if [ -n "$port" ]; then
+        "$UFW_BIN" allow out to "$resource" port "$port" proto tcp 2>/dev/null || "$UFW_BIN" allow from any to "$resource" port "$port" 2>/dev/null || true
+        "$UFW_BIN" allow out to "$resource" port "$port" 2>/dev/null || true
+      else
+        "$UFW_BIN" allow out to "$resource" 2>/dev/null || "$UFW_BIN" allow from any to "$resource" 2>/dev/null || true
+      fi
+    fi
+    tmp="$(mktemp)"; jq --arg r "$full" '.global.allow += [$r] | .global.allow |= unique' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+    echo "Allowed $full (global)"
+  fi
+  sync_proxy_allowlist
+}
+
+cmd_deny() {
+  require_root; ensure_dirs; init_policy_file
+  local type="${1:-}"; shift || true
+  if [ "$type" != "network" ]; then die "only network supported"; fi
+  local resource="${1:-}"; [ -n "$resource" ] || die "deny requires resource"
+  shift || true
+  local sandbox="" port=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sandbox) sandbox="$2"; shift 2 ;;
+      --port) port="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  local full="$resource"
+  if [ -n "$port" ]; then full="${resource}:${port}"; fi
+  if [ -n "$sandbox" ]; then
+    tmp="$(mktemp)"; jq --arg s "$sandbox" --arg r "$full" '.sandboxes[$s] //= {"allow":[],"deny":[]} | .sandboxes[$s].deny += [$r] | .sandboxes[$s].deny |= unique' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+    echo "Denied $full for sandbox $sandbox"
+  else
+    if is_ip_or_cidr "$resource"; then
+      echo "Adding ufw deny for IP/CIDR $resource ..."
+      "$UFW_BIN" deny out to "$resource" 2>/dev/null || "$UFW_BIN" deny from any to "$resource" 2>/dev/null || true
+      "$UFW_BIN" deny out from any to "$resource" 2>/dev/null || true
+    fi
+    tmp="$(mktemp)"; jq --arg r "$full" '.global.deny += [$r] | .global.deny |= unique' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+    echo "Denied $full (global)"
+  fi
+  sync_proxy_allowlist
+}
+
+cmd_rm() {
+  require_root; ensure_dirs; init_policy_file
+  local type="${1:-}"; shift || true
+  if [ "$type" != "network" ]; then die "only network"; fi
+  local resource="" id=""
+  local sandbox=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --resource) resource="$2"; shift 2 ;;
+      --id) id="$2"; shift 2 ;;
+      --sandbox) sandbox="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ -n "$resource" ]; then
+    if [ -n "$sandbox" ]; then
+      tmp="$(mktemp)"; jq --arg s "$sandbox" --arg r "$resource" '(.sandboxes[$s].allow //= []) |= map(select(. != $r)) | (.sandboxes[$s].deny //= []) |= map(select(. != $r))' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+    else
+      # try both allow/deny arrays + with :port variants? Remove exact and stripped
+      tmp="$(mktemp)"; jq --arg r "$resource" '(.global.allow //= []) |= map(select(. != $r and (. | split(":")[0] != $r))) | (.global.deny //= []) |= map(select(. != $r and (. | split(":")[0] != $r))) | .sandboxes |= with_entries(.value.allow |= map(select(. != $r))) | .sandboxes |= with_entries(.value.deny |= map(select(. != $r)))' "$POLICY_FILE" > "$tmp" && mv "$tmp" "$POLICY_FILE"
+      # also try ufw delete
+      if is_ip_or_cidr "$resource"; then
+        "$UFW_BIN" delete allow out to "$resource" 2>/dev/null || true
+        "$UFW_BIN" delete deny out to "$resource" 2>/dev/null || true
+        "$UFW_BIN" --force delete allow out to "$resource" 2>/dev/null || true
+        "$UFW_BIN" --force delete deny out to "$resource" 2>/dev/null || true
+      fi
+    fi
+    echo "Removed $resource"
+  elif [ -n "$id" ]; then
+    echo "id-based removal not yet implemented (use --resource)"
+    exit 1
+  else
+    die "rm requires --resource <host> or --id <id>"
+  fi
+  sync_proxy_allowlist
+}
+
+cmd_check() {
+  ensure_dirs; init_policy_file
+  local type="${1:-}"; shift || true
+  if [ "$type" != "network" ]; then die "only network"; fi
+  local target="${1:-}"; [ -n "$target" ] || die "check requires host"
+  shift || true
+  local sandbox=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --sandbox) sandbox="$2"; shift 2 ;; *) shift ;; esac
+  done
+  # normalize target: if url, extract host
+  local host="$target"
+  # strip scheme
+  if [[ "$host" == *"://"* ]]; then host="${host#*://}"; host="${host%%/*}"; fi
+  # strip path
+  host="${host%%/*}"
+  # keep host:port for display but for matching use host only
+  local host_only="${host%%:*}"
+  local port="${host#*:}"
+  if [ "$port" = "$host" ]; then port="443"; fi
+
+  # check deny first (global + sandbox)
+  check_match() {
+    local pat="$1"; domain_matches "$pat" "$host_only" || domain_matches "$pat" "$host"
+  }
+
+  # collect deny patterns
+  for pat in $(jq -r '.global.deny[]?' "$POLICY_FILE" 2>/dev/null; load_preset_domains "open" >/dev/null); do
+    if domain_matches "$pat" "$host_only" || domain_matches "$pat" "$host"; then
+      echo "Denied: $target"
+      echo "Reason: denied by global rule \"$pat\""
+      return 1
+    fi
+  done
+  if [ -n "$sandbox" ]; then
+    for pat in $(jq -r --arg s "$sandbox" '.sandboxes[$s].deny[]?' "$POLICY_FILE" 2>/dev/null); do
+      if domain_matches "$pat" "$host_only"; then
+        echo "Denied: $target"
+        echo "Reason: denied by sandbox $sandbox rule \"$pat\""
+        return 1
+      fi
+    done
+  fi
+
+  # check allow: preset + global allow + sandbox allow
+  local preset; preset="$(jq -r '.preset // "balanced"' "$POLICY_FILE" 2>/dev/null)"
+  # preset domains
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    if domain_matches "$pat" "$host_only" || domain_matches "$pat" "$host"; then
+      echo "Allowed: $target"
+      echo "Preset: $preset"
+      return 0
+    fi
+  done < <(load_preset_domains "$preset")
+
+  for pat in $(jq -r '.global.allow[]?' "$POLICY_FILE" 2>/dev/null); do
+    if domain_matches "$pat" "$host_only" || domain_matches "$pat" "$host"; then
+      echo "Allowed: $target"
+      return 0
+    fi
+  done
+  if [ -n "$sandbox" ]; then
+    for pat in $(jq -r --arg s "$sandbox" '.sandboxes[$s].allow[]?' "$POLICY_FILE" 2>/dev/null); do
+      if domain_matches "$pat" "$host_only"; then
+        echo "Allowed: $target (sandbox $sandbox)"
+        return 0
+      fi
+    done
+  fi
+
+  # open preset handled via "**" in load
+  echo "Denied: $target"
+  echo "Reason: no matching allow rule (default deny)"
+  return 1
+}
+
+cmd_reset() {
+  require_root; ensure_dirs
+  local force=0
+  while [ $# -gt 0 ]; do case "$1" in --force) force=1; shift;; *) shift;; esac; done
+  if [ "$force" != "1" ] && [ -t 0 ]; then
+    read -r -p "Reset policy (clears all custom rules)? [y/N] " ans
+    case "$ans" in [yY]*) ;; *) echo "Aborted"; return 0;; esac
+  fi
+  rm -f "$POLICY_FILE" 2>/dev/null || true
+  rm -f "$PROXY_ALLOWLIST" 2>/dev/null || true
+  init_policy_file
+  sync_proxy_allowlist
+  echo "Policy reset."
+  # re-init with prompt
+  cmd_init "balanced"
+}
+
+# preset alias
+cmd_preset() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    list) echo "Presets: open, balanced, locked"; echo ""; echo "Current: $(jq -r '.preset' "$POLICY_FILE" 2>/dev/null || echo balanced)"; ;;
+    apply) cmd_init "$@" ;;
+    diff) echo "TODO: diff preset vs active"; cmd_ls --wide "$@" ;;
+    *) echo "Usage: sandbox-policy preset list|apply <preset>|diff" >&2; exit 1 ;;
+  esac
+}
+
+usage() {
+  cat <<'USAGE'
+sandbox-policy — network policy engine (like `sbx policy`)
+
+Usage:
+  sandbox-policy init [balanced|open|locked]   init preset (prompts if tty)
+  sandbox-policy ls [--wide] [--sandbox NAME] [--json]
+  sandbox-policy allow network <host|cidr|**|*.*> [--port PORT] [--sandbox NAME]
+  sandbox-policy deny  network <host|cidr> [--port PORT] [--sandbox NAME]
+  sandbox-policy rm network --resource <host> [--sandbox NAME]
+  sandbox-policy check network <host|host:port|url> [--sandbox NAME]
+  sandbox-policy reset [--force]
+  sandbox-policy preset list|apply <preset>|diff
+  sandbox-policy --help
+
+Examples:
+  sandbox-policy init balanced
+  sandbox-policy allow network registry.npmjs.org
+  sandbox-policy allow network api.exa.ai --sandbox alice
+  sandbox-policy deny network ads.example.com
+  sandbox-policy check network api.github.com:443
+  sandbox-policy check network https://evil.com/path
+USAGE
+}
+
+case "${1:-}" in
+  init) shift; cmd_init "$@" ;;
+  ls|list) shift; cmd_ls "$@" ;;
+  allow) shift; cmd_allow "$@" ;;
+  deny) shift; cmd_deny "$@" ;;
+  rm) shift; cmd_rm "$@" ;;
+  check) shift; cmd_check "$@" ;;
+  reset) shift; cmd_reset "$@" ;;
+  preset) shift; cmd_preset "$@" ;;
+  -h|--help|help|"") usage; exit 1 ;;
+  *) die "unknown subcommand: $1" ;;
+esac

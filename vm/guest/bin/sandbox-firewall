@@ -10,19 +10,30 @@ UFW_BIN="/usr/sbin/ufw"
 
 usage() {
   cat <<'USAGE'
-sandbox-firewall — manage VM firewall (ufw) IP allow/deny lists
+sandbox-firewall — manage VM firewall (ufw) IP allow/deny lists + ingress/egress
 
 Usage:
-  sandbox-firewall allow <IP>[/prefix]    allow IP/net to reach SSH (tcp/22)
-  sandbox-firewall deny  <IP>[/prefix]    block ALL traffic from IP/net
-  sandbox-firewall remove <IP>[/prefix]   remove matching allow and deny rules
+  sandbox-firewall allow <IP>[/prefix] [--port PORT] [--proto tcp|udp]    allow IP/net to reach SSH (tcp/22 default)
+  sandbox-firewall deny  <IP>[/prefix] [--port PORT] [--proto tcp|udp]    block ALL traffic from IP/net
+  sandbox-firewall remove <IP>[/prefix] [--port PORT] [--proto tcp|udp]   remove matching allow and deny rules
   sandbox-firewall enforce                lock down: drop bootstrap "any → :22" rule
-  sandbox-firewall list                   show status + rules
+  sandbox-firewall list [--ingress] [--egress] [--wide]   show status + rules
+  # New ingress/egress scoped commands (port/proto aware)
+  sandbox-firewall ingress allow <IP>[/prefix] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall ingress deny  <IP>[/prefix] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall ingress remove <IP>[/prefix] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall egress allow <DST>[/prefix|any] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall egress deny  <DST>[/prefix|any] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall egress remove <DST>[/prefix|any] [--port PORT] [--proto tcp|udp]
+  sandbox-firewall egress enforce          # default deny outgoing (after allowlist)
 
 Examples:
   sandbox-firewall allow 203.0.113.42
-  sandbox-firewall allow 198.51.100.0/24
+  sandbox-firewall allow 198.51.100.0/24 --port 2222 --proto tcp
   sandbox-firewall deny  192.0.2.55
+  sandbox-firewall ingress allow 203.0.113.42 --port 8080
+  sandbox-firewall egress allow 1.1.1.1 --port 53
+  sandbox-firewall egress deny any --port 25
   sandbox-firewall remove 203.0.113.42
   sandbox-firewall enforce
 
@@ -30,6 +41,8 @@ Notes:
   - deny rules take precedence over allow for the same source (ufw evaluates
     rules in order; add denies after removing allows for that IP).
   - Rules persist across reboots via the ufw systemd service.
+  - For domain-based egress (e.g. registry.npmjs.org, api.exa.ai) use sandbox-policy
+    which syncs to the proxy allowlist; ufw handles IP/CIDR.
 
 Workflow:
   1. Provision opens tcp/22 to any (bootstrap rule) so SSH keeps working.
@@ -71,29 +84,168 @@ ensure_defaults() {
   fi
 }
 
+parse_port_proto() {
+  # parse --port/--proto from args, sets globals PORT PROTO ARGS
+  PORT=""; PROTO="tcp"
+  local out=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --port) PORT="$2"; shift 2 ;;
+      --proto) PROTO="$2"; shift 2 ;;
+      *) out+=("$1"); shift ;;
+    esac
+  done
+  if [ ${#out[@]} -gt 0 ]; then IP="${out[0]}"; else IP=""; fi
+}
+
 cmd_allow() {
   require_root; require_ufw; ensure_defaults
-  local ip="${1:-}"; [ -n "$ip" ] || die "allow requires an IP"
-  echo "Allowing $ip → tcp/22 ..."
-  "$UFW_BIN" allow from "$ip" to any port 22 proto tcp
-  echo "Allowed $ip"
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "allow requires an IP"
+  local port="${PORT:-22}"; local proto="${PROTO:-tcp}"
+  if [ -n "$PORT" ]; then
+    echo "Allowing $IP → $proto/$port ..."
+    "$UFW_BIN" allow from "$IP" to any port "$port" proto "$proto"
+  else
+    echo "Allowing $IP → $proto/22 ..."
+    "$UFW_BIN" allow from "$IP" to any port 22 proto tcp
+  fi
+  echo "Allowed $IP"
 }
 
 cmd_deny() {
   require_root; require_ufw; ensure_defaults
-  local ip="${1:-}"; [ -n "$ip" ] || die "deny requires an IP"
-  echo "Blocking $ip (all ports) ..."
-  "$UFW_BIN" deny from "$ip"
-  echo "Denied $ip"
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "deny requires an IP"
+  if [ -n "$PORT" ]; then
+    echo "Blocking $IP port $PORT/$PROTO ..."
+    "$UFW_BIN" deny from "$IP" to any port "$PORT" proto "$PROTO" 2>/dev/null || "$UFW_BIN" deny from "$IP"
+  else
+    echo "Blocking $IP (all ports) ..."
+    "$UFW_BIN" deny from "$IP"
+  fi
+  echo "Denied $IP"
 }
 
 cmd_remove() {
   require_root; require_ufw
-  local ip="${1:-}"; [ -n "$ip" ] || die "remove requires an IP"
-  echo "Removing rules for $ip ..."
-  "$UFW_BIN" delete allow from "$ip" to any port 22 proto tcp >/dev/null 2>&1 || true
-  "$UFW_BIN" delete deny from "$ip"                                  >/dev/null 2>&1 || true
-  echo "Removed $ip (if present)"
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "remove requires an IP"
+  echo "Removing rules for $IP ..."
+  if [ -n "$PORT" ]; then
+    "$UFW_BIN" delete allow from "$IP" to any port "$PORT" proto "$PROTO" >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny from "$IP" to any port "$PORT" proto "$PROTO" >/dev/null 2>&1 || true
+  else
+    "$UFW_BIN" delete allow from "$IP" to any port 22 proto tcp >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny from "$IP"                                  >/dev/null 2>&1 || true
+    # also try without port spec
+    "$UFW_BIN" delete allow from "$IP" >/dev/null 2>&1 || true
+  fi
+  echo "Removed $IP (if present)"
+}
+
+# ── ingress/egress scoped wrappers ───────────────────────────────────────
+cmd_ingress_allow() {
+  require_root; require_ufw; ensure_defaults
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "ingress allow requires IP"
+  local port="${PORT:-22}"; local proto="${PROTO:-tcp}"
+  echo "Allowing ingress $IP → $proto/$port ..."
+  "$UFW_BIN" allow from "$IP" to any port "$port" proto "$proto"
+}
+cmd_ingress_deny() {
+  require_root; require_ufw; ensure_defaults
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "ingress deny requires IP"
+  if [ -n "$PORT" ]; then
+    "$UFW_BIN" deny from "$IP" to any port "$PORT" proto "$PROTO"
+  else
+    "$UFW_BIN" deny from "$IP"
+  fi
+}
+cmd_ingress_remove() {
+  require_root; require_ufw
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "ingress remove requires IP"
+  if [ -n "$PORT" ]; then
+    "$UFW_BIN" delete allow from "$IP" to any port "$PORT" proto "$PROTO" >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny from "$IP" to any port "$PORT" proto "$PROTO" >/dev/null 2>&1 || true
+  else
+    "$UFW_BIN" delete allow from "$IP" to any port 22 proto tcp >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny from "$IP" >/dev/null 2>&1 || true
+  fi
+  echo "Removed ingress $IP"
+}
+cmd_egress_allow() {
+  require_root; require_ufw; ensure_defaults
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "egress allow requires DST (IP/CIDR/any)"
+  local port="${PORT:-}"; local proto="${PROTO:-tcp}"
+  if [ "$IP" = "any" ]; then IP="any"; fi
+  if [ -n "$port" ]; then
+    echo "Allowing egress to $IP port $port/$proto ..."
+    if [ "$IP" = "any" ]; then
+      "$UFW_BIN" allow out to any port "$port" proto "$proto" 2>/dev/null || "$UFW_BIN" allow out "$port"/"$proto" 2>/dev/null || true
+    else
+      "$UFW_BIN" allow out to "$IP" port "$port" proto "$proto" 2>/dev/null || "$UFW_BIN" allow out to "$IP" 2>/dev/null || true
+    fi
+  else
+    echo "Allowing egress to $IP ..."
+    if [ "$IP" = "any" ]; then
+      "$UFW_BIN" default allow outgoing >/dev/null 2>&1 || true
+    else
+      "$UFW_BIN" allow out to "$IP" 2>/dev/null || "$UFW_BIN" allow out from any to "$IP" 2>/dev/null || true
+    fi
+  fi
+}
+cmd_egress_deny() {
+  require_root; require_ufw; ensure_defaults
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "egress deny requires DST"
+  local port="${PORT:-}"; local proto="${PROTO:-tcp}"
+  if [ -n "$port" ]; then
+    echo "Blocking egress to $IP port $port/$proto ..."
+    if [ "$IP" = "any" ]; then
+      "$UFW_BIN" deny out to any port "$port" proto "$proto" 2>/dev/null || true
+    else
+      "$UFW_BIN" deny out to "$IP" port "$port" proto "$proto" 2>/dev/null || "$UFW_BIN" deny out to "$IP" 2>/dev/null || true
+    fi
+  else
+    echo "Blocking egress to $IP ..."
+    if [ "$IP" = "any" ]; then
+      "$UFW_BIN" default deny outgoing >/dev/null 2>&1 || true
+    else
+      "$UFW_BIN" deny out to "$IP" 2>/dev/null || true
+    fi
+  fi
+}
+cmd_egress_remove() {
+  require_root; require_ufw
+  parse_port_proto "$@"
+  [ -n "$IP" ] || die "egress remove requires DST"
+  local port="${PORT:-}"; local proto="${PROTO:-tcp}"
+  if [ -n "$port" ]; then
+    "$UFW_BIN" delete allow out to "$IP" port "$port" proto "$proto" >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny out to "$IP" port "$port" proto "$proto" >/dev/null 2>&1 || true
+    if [ "$IP" = "any" ]; then
+      "$UFW_BIN" delete allow out to any port "$port" proto "$proto" >/dev/null 2>&1 || true
+      "$UFW_BIN" delete deny out to any port "$port" proto "$proto" >/dev/null 2>&1 || true
+    fi
+  else
+    "$UFW_BIN" delete allow out to "$IP" >/dev/null 2>&1 || true
+    "$UFW_BIN" delete deny out to "$IP" >/dev/null 2>&1 || true
+  fi
+  echo "Removed egress $IP"
+}
+cmd_egress_enforce() {
+  require_root; require_ufw; ensure_defaults
+  echo "Enforcing egress default deny ..."
+  "$UFW_BIN" default deny outgoing >/dev/null 2>&1 || true
+  "$UFW_BIN" allow out 53 >/dev/null 2>&1 || true
+  "$UFW_BIN" allow out 80 >/dev/null 2>&1 || true
+  "$UFW_BIN" allow out 443 >/dev/null 2>&1 || true
+  "$UFW_BIN" --force enable >/dev/null 2>&1 || true
+  echo "Egress default deny active (allow 53,80,443 for preset via proxy)."
 }
 
 cmd_enforce() {
@@ -114,15 +266,40 @@ cmd_enforce() {
 
 cmd_list() {
   require_root; require_ufw
+  local filter=""; local wide=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ingress) filter="ingress"; shift ;;
+      --egress) filter="egress"; shift ;;
+      --wide) wide=1; shift ;;
+      *) shift ;;
+    esac
+  done
   echo "=== ufw status ==="
   "$UFW_BIN" status verbose || true
   echo ""
   echo "=== rules (numbered) ==="
   "$UFW_BIN" status numbered || true
   echo ""
+  if [ -n "$filter" ]; then
+    echo "=== filter: $filter ==="
+    "$UFW_BIN" status numbered 2>/dev/null | grep -i "$filter" || true
+    echo ""
+  fi
   if "$UFW_BIN" status 2>/dev/null | awk '$0 ~ /ALLOW/' | grep -v "Status:" | grep -Eq "Anywhere.*22/tcp|22/tcp.*Anywhere"; then
     echo "NOTE: bootstrap rule still active — run 'sudo sandbox-firewall enforce'"
     echo "      once you have added your real allow-list entries."
+  fi
+  if [ -f /etc/sandbox/proxy-allowlist.txt ]; then
+    echo ""
+    echo "=== proxy allowlist (/etc/sandbox/proxy-allowlist.txt) ==="
+    wc -l < /etc/sandbox/proxy-allowlist.txt 2>/dev/null | tr -d ' ' | xargs -I{} echo "  {} entries"
+    if [ "$wide" = "1" ]; then cat /etc/sandbox/proxy-allowlist.txt | sed 's/^/  /'; fi
+  fi
+  if [ -f /var/lib/sandbox/policy.json ]; then
+    echo ""
+    echo "=== policy preset ==="
+    jq -r '.preset // "?"' /var/lib/sandbox/policy.json 2>/dev/null | xargs -I{} echo "  preset: {}"
   fi
 }
 
@@ -131,7 +308,26 @@ case "${1:-}" in
   deny)   shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_deny "$@" ;;
   remove|delete|unallow|undeny) shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_remove "$@" ;;
   enforce|lockdown) cmd_enforce ;;
-  list|show|status) cmd_list ;;
+  list|show|status) cmd_list "$@" ;;
+  ingress)
+    SUB="${2:-}"; shift 2 || true
+    case "$SUB" in
+      allow) cmd_ingress_allow "$@" ;;
+      deny) cmd_ingress_deny "$@" ;;
+      remove|delete) cmd_ingress_remove "$@" ;;
+      *) die "unknown ingress subcommand: $SUB" ;;
+    esac
+    ;;
+  egress)
+    SUB="${2:-}"; shift 2 || true
+    case "$SUB" in
+      allow) cmd_egress_allow "$@" ;;
+      deny) cmd_egress_deny "$@" ;;
+      remove|delete) cmd_egress_remove "$@" ;;
+      enforce) cmd_egress_enforce ;;
+      *) die "unknown egress subcommand: $SUB" ;;
+    esac
+    ;;
   -h|--help|help|"") usage; exit 1 ;;
   *) die "unknown command: $1 (see --help)" ;;
 esac
