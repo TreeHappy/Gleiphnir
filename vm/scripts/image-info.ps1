@@ -3,6 +3,8 @@ $ErrorActionAttribute = $null
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.image_info' @{ 'script.name' = 'image-info.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 $base = $BASE_IMAGE
 if (-not (Test-Path -LiteralPath $base)) {
     $found = Get-ChildItem -LiteralPath $IMAGES_DIR -Filter '*.img' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -14,4 +16,9 @@ if ($base -and (Test-Path -LiteralPath $base)) {
     Get-Item -LiteralPath $base | ForEach-Object { "{0,10:N1} MB  {1}" -f ($_.Length / 1MB), $_.FullName }
 } else {
     Write-Host "No image found. Run: mise run image:download"
+}
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

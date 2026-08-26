@@ -4,6 +4,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.deploy_observability' @{ 'script.name' = 'deploy-observability.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 Write-Host "==> Deploying observability agents to VM"
 
 if ($env:OBSERVABILITY_ENABLED -ne 'true') {
@@ -124,3 +126,8 @@ Write-Host "  mitmproxy: installed"
 
 Write-Host ""
 Write-Host "Observability agents deployed. Telemetry flows to ${lgtmHost}:4317."
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

@@ -3,6 +3,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'sbom.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 $usage = @"
 sbom.ps1 — generate Software Bill of Materials
 
@@ -99,3 +103,8 @@ Get-ChildItem -LiteralPath $OutputDir -File | Sort-Object LastWriteTime -Descend
 
 Write-Host ""
 Write-Host "Done."
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

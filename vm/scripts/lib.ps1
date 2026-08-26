@@ -74,6 +74,13 @@ Set-Default 'OBSERVABILITY_OTLP_PORT'           '4317'
 Set-Default 'OBSERVABILITY_PROM_PORT'           '9090'
 Set-Default 'OBSERVABILITY_PROXY_ENABLED'       'true'
 Set-Default 'OBSERVABILITY_SESSION_LOGGING'     'true'
+Set-Default 'OTEL_EXPORTER_OTLP_ENDPOINT'       ''
+Set-Default 'OTEL_SERVICE_NAME'                  'gleiphnir-host'
+
+# Auto-detect OTLP endpoint from observability settings
+if ([string]::IsNullOrEmpty($env:OTEL_EXPORTER_OTLP_ENDPOINT) -and $env:OBSERVABILITY_ENABLED -eq 'true') {
+    $env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:$($env:OBSERVABILITY_OTLP_PORT)"
+}
 
 $script:IsWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 
@@ -232,3 +239,36 @@ function Invoke-AdminSshWithFallback {
 }
 
 function script:Write-Info([string]$msg) { Write-Host $msg }
+
+# ── otel-cli span helpers ──────────────────────────────────────────────────
+# Gracefully skip if otel-cli is not installed or OTLP endpoint is not configured.
+function script:Start-OtelSpan([string]$Name, [hashtable]$Attributes = @{}) {
+    if ([string]::IsNullOrEmpty($env:OTEL_EXPORTER_OTLP_ENDPOINT)) { return }
+    if (-not (Get-Command otel-cli -ErrorAction SilentlyContinue)) { return }
+    $spanArgs = @('span', 'start', '--name', $Name, '--kind', 'internal',
+                  '--endpoint', $env:OTEL_EXPORTER_OTLP_ENDPOINT)
+    foreach ($k in $Attributes.Keys) {
+        $spanArgs += @('--attr', "$k=$($Attributes[$k])")
+    }
+    & otel-cli @spanArgs 2>$null
+}
+
+function script:End-OtelSpan([string]$Status = 'OK', [string]$ErrorMessage = '') {
+    if ([string]::IsNullOrEmpty($env:OTEL_EXPORTER_OTLP_ENDPOINT)) { return }
+    if (-not (Get-Command otel-cli -ErrorAction SilentlyContinue)) { return }
+    $spanArgs = @('span', 'end', '--status', $Status)
+    if ($ErrorMessage -ne '') { $spanArgs += @('--attr', "error.message=$ErrorMessage") }
+    & otel-cli @spanArgs 2>$null
+}
+
+function script:Invoke-WithSpan([string]$Name, [scriptblock]$Body) {
+    Start-OtelSpan $Name @{ 'script.name' = $Name; 'service.name' = $env:OTEL_SERVICE_NAME }
+    try {
+        $result = & $Body
+        End-OtelSpan 'OK'
+        return $result
+    } catch {
+        End-OtelSpan 'ERROR' $_.Exception.Message
+        throw
+    }
+}

@@ -4,6 +4,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'manage-user.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 # Accept both positional and KEY=VALUE forms
 $action = ''; $user = ''; $keyArg = ''
 $positional = @()
@@ -71,4 +75,9 @@ switch ($action) {
     default {
         Write-Error "Unknown action: $action (expected add|remove|list)"
     }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

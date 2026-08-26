@@ -7,6 +7,8 @@ if (Test-VmRunning) {
 }
 
 Require-BaseImage
+Start-OtelSpan 'gleiphnir.start_vm' @{ 'script.name' = 'start-vm.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 
 if ((-not (Test-Path -LiteralPath $SYSTEM_DISK)) -or (-not (Test-Path -LiteralPath $DATA_DISK)) -or (-not (Test-Path -LiteralPath $SEED_ISO))) {
     Write-Host "Disks or seed ISO missing. Running prepare step first ..."
@@ -180,3 +182,8 @@ if ($networkMode -eq 'bridge') {
     Write-Host "VM SSH via host forward only: ssh -p $HOST_SSH_FORWARD_PORT $($env:ADMIN_USER)@127.0.0.1"
 }
 Write-Host "Wait for boot: mise run vm:ssh:wait  (or mise run vm:console to watch boot)"
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

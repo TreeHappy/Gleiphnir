@@ -42,6 +42,8 @@ function script:Ensure-MiseTool([string]$tool, [string]$version = "latest") {
     }
 }
 
+Start-OtelSpan 'gleiphnir.install_deps' @{ 'script.name' = 'install-deps.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 # ── Python (via mise) ──────────────────────────────────────────────────────
 Write-Host "`n[1/3] Python"
 Ensure-MiseTool "python" "3.12"
@@ -101,5 +103,10 @@ if ($script:failed -gt 0) {
     Write-Host "==> Done — $script:installed package(s) installed" -ForegroundColor Green
 } else {
     Write-Host "==> Done — all dependencies already present" -ForegroundColor Green
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }
 exit 0

@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.vm_info' @{ 'script.name' = 'vm-info.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 Write-Host "=== VM info: $VM_NAME ==="
 Write-Host "Mode:          $($env:NETWORK_MODE)"
 Write-Host "Hostname:      $($env:VM_HOSTNAME)"
@@ -59,4 +61,9 @@ if (Test-Path -LiteralPath $CONSOLE_LOG) {
     Get-Content -LiteralPath $CONSOLE_LOG -Tail 20
 } else {
     Write-Host "(no console log yet)"
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

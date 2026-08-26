@@ -13,21 +13,63 @@ Gleiphnir includes optional observability powered by the **Grafana LGTM stack** 
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ HOST MACHINE                                                    │
-│                                                                 │
-│  ┌──────────────────┐    ┌──────────────────────────┐           │
-│  │ gleiphnir VM     │    │ gleiphnir-lgtm container │           │
-│  │ (QEMU)           │    │ grafana/otel-lgtm        │           │
-│  │                  │───>│                          │           │
-│  │  node-exporter   │    │  Grafana   :3000         │           │
-│  │  otel-collector  │    │  Tempo     (built-in)    │           │
-│  │  mitmproxy       │    │  Loki      (built-in)    │           │
-│  │  session-logger  │    │  Prometheus:9090         │           │
-│  │  journal hooks   │    │  OTLP gRPC :4317         │           │
-│  └──────────────────┘    └──────────────────────────┘           │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '14px' }}}%%
+flowchart TB
+    subgraph HOST["Host Machine"]
+        style HOST fill:#1e1e2e,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4
+        
+        subgraph LGTM["LGTM Container — gleiphnir-lgtm"]
+            style LGTM fill:#1e1e2e,stroke:#89dceb,stroke-width:2px,color:#cdd6f4
+            
+            GRAFANA["Grafana :3000"]
+            style GRAFANA fill:#89dceb,stroke:#89dceb,color:#1e1e2e
+            
+            LOKI["Loki"]
+            style LOKI fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+            
+            TEMPO["Tempo"]
+            style TEMPO fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+            
+            PROM["Prometheus :9090"]
+            style PROM fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+            
+            OTLP_RECV["OTLP gRPC :4317"]
+            style OTLP_RECV fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+            
+            GRAFANA --> LOKI
+            GRAFANA --> TEMPO
+            GRAFANA --> PROM
+        end
+        
+        HOST_SCRIPTS["Host pwsh scripts<br/>otel-cli spans"]
+        style HOST_SCRIPTS fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    end
+    
+    subgraph VM["Gleiphnir VM"]
+        style VM fill:#1e1e2e,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4
+        
+        OTEL_COL["OTel Collector"]
+        style OTEL_COL fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+        
+        NODE_EXP["node-exporter :9100"]
+        style NODE_EXP fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        PROXY["mitmproxy :8080"]
+        style PROXY fill:#fab387,stroke:#fab387,color:#1e1e2e
+        
+        LOGGER["session-logger"]
+        style LOGGER fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        JOURNAL["audit journal"]
+        style JOURNAL fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        NODE_EXP -->|"prometheus scrape"| OTEL_COL
+        PROXY -->|"OTLP/HTTP :4318"| OTEL_COL
+        HOST_SCRIPTS -.->|"OTLP :4317 (when enabled)"| OTLP_RECV
+    end
+    
+    OTEL_COL -->|"OTLP :4317"| OTLP_RECV
 ```
 
 The LGTM container runs as a **standalone Podman container on the host**, not inside the Gleiphnir VM. The VM ships telemetry to it over the network:
@@ -237,40 +279,74 @@ Each sandbox container emits a start event via `entrypoint.sh`:
 
 ## Data Flow
 
-```
-Container hooks (bash PROMPT_COMMAND / pwsh prompt)
-  └─> /var/log/sandbox/journal-*.jsonl ──────────────┐
-                                                      │
-mitmproxy (OTel spans + JSONL)                       │
-  ├─> OTLP/HTTP :4318 ──> OTel Collector ───────────┤
-  └─> /var/log/sandbox/proxy-*.jsonl ────────────────┤
-                                                      │
-Session logger (PTY capture)                         │
-  └─> /var/log/sandbox/session-*.jsonl ──────────────┤
-                                                      │
-Guest scripts (audit)                                │
-  └─> /var/log/sandbox/audit.jsonl ──────────────────┤
-                                                      │
-node-exporter :9100 ──> OTel Collector (prometheus) ──┤
-                                                      │
-                              ┌───────────────────────┘
-                              ▼
-                   OTel Collector (VM)
-                   ├─ filelog receivers (all JSONL files)
-                   ├─ OTLP receiver (spans from mitmproxy)
-                   └─ prometheus receiver (node-exporter)
-                              │
-                              ▼ OTLP :4317
-                   LGTM Container (host)
-                   ├─ Loki   ← logs (journal, session, proxy, audit)
-                   ├─ Tempo  ← traces (OTel spans)
-                   └─ Prometheus ← metrics (node-exporter)
-                              │
-                              ▼
-                   Grafana :3000
-                   ├─ Logs     (Loki)
-                   ├─ Traces   (Tempo)
-                   └─ Metrics  (Prometheus)
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '14px' }}}%%
+flowchart TB
+    subgraph SOURCES["Telemetry Sources"]
+        style SOURCES fill:#1e1e2e,stroke:#f5c2e7,stroke-width:2px,color:#cdd6f4
+        
+        HOOKS["Shell Hooks<br/>bash PROMPT_COMMAND / pwsh prompt()"]
+        style HOOKS fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        MITM["mitmproxy<br/>OTel spans + JSONL"]
+        style MITM fill:#fab387,stroke:#fab387,color:#1e1e2e
+        
+        SESS["Session Logger<br/>PTY capture"]
+        style SESS fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        AUDIT["Guest Scripts<br/>audit events"]
+        style AUDIT fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        NODE["node-exporter<br/>:9100"]
+        style NODE fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        HOST_SCRIPTS["Host pwsh Scripts<br/>otel-cli spans"]
+        style HOST_SCRIPTS fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    end
+    
+    subgraph COLLECTOR["OTel Collector — VM"]
+        style COLLECTOR fill:#1e1e2e,stroke:#94e2d5,stroke-width:2px,color:#cdd6f4
+        
+        FILELOG["filelog receivers<br/>JSONL files"]
+        style FILELOG fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+        
+        OTLP["OTLP receiver<br/>Spans from mitmproxy"]
+        style OTLP fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+        
+        PROM_RCV["prometheus receiver<br/>node-exporter scrape"]
+        style PROM_RCV fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+    end
+    
+    subgraph BACKEND["LGTM Container — Host"]
+        style BACKEND fill:#1e1e2e,stroke:#89dceb,stroke-width:2px,color:#cdd6f4
+        
+        LOKI["Loki<br/>Logs"]
+        style LOKI fill:#89dceb,stroke:#89dceb,color:#1e1e2e
+        
+        TEMPO["Tempo<br/>Traces"]
+        style TEMPO fill:#89dceb,stroke:#89dceb,color:#1e1e2e
+        
+        PROM["Prometheus<br/>Metrics"]
+        style PROM fill:#89dceb,stroke:#89dceb,color:#1e1e2e
+        
+        GRAFANA["Grafana :3000<br/>Unified Dashboards"]
+        style GRAFANA fill:#f9e2af,stroke:#f9e2af,color:#1e1e2e
+        
+        GRAFANA --> LOKI
+        GRAFANA --> TEMPO
+        GRAFANA --> PROM
+    end
+    
+    HOOKS -->|"JSONL"| FILELOG
+    SESS -->|"JSONL"| FILELOG
+    AUDIT -->|"JSONL"| FILELOG
+    MITM -->|"OTLP/HTTP :4318"| OTLP
+    NODE -->|"prometheus :9100"| PROM_RCV
+    HOST_SCRIPTS -.->|"OTLP :4317 (when enabled)"| OTLP
+    
+    FILELOG -->|"OTLP :4317"| LOKI
+    OTLP -->|"OTLP :4317"| TEMPO
+    PROM_RCV -->|"OTLP :4317"| PROM
 ```
 
 ## Resource Impact

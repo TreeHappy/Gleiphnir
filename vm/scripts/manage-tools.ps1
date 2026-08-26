@@ -2,6 +2,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'manage-tools.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 $usage = @"
 manage-tools.ps1 — inspect and manage mise tool installs
 
@@ -54,4 +58,9 @@ switch ($SubCmd) {
     'volumes' {
         exit (Invoke-AdminSshWithFallback -Command "sandbox-tools volumes")
     }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

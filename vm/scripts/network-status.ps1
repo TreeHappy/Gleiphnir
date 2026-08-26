@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.network_status' @{ 'script.name' = 'network-status.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if ($IsWin) {
     Write-Host "=== Network mode: $($env:NETWORK_MODE) ==="
     Write-Host ""
@@ -44,4 +46,9 @@ if ($iptables) {
     Write-Host ""
     Write-Host "--- iptables filter FORWARD ---"
     & sudo iptables -L FORWARD -n -v 2>&1 | Select-Object -First 20
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

@@ -34,26 +34,78 @@ ssh -p 2222 admin@127.0.0.1
 
 ## Architecture
 
-```
-Host (Linux+KVM or Windows+WHPX/TCG)
- └─ QEMU VM  — Ubuntu 26.04 ("resolute") cloud image
-     ├─ bridge mode (Linux): TAP → br-gleiphnir, DNAT :2222 → VM:22
-     │    (real client IPs preserved → guest ufw can filter them)
-     │  user mode (Windows default): QEMU NAT hostfwd :2222 → VM:22
-     │    (zero host changes; Gleiphnir never touches host firewall)
-     ├─ Guest firewall: ufw — default-deny incoming, tcp/22 allow-list
-     ├─ Data disk /dev/vdb → /srv/sandbox (ext4)   ← per-user workspaces (/work)
-     ├─ Podman containers:
-     │   • ubuntu:26.04 · read-only rootfs · --cap-drop ALL · no-new-privileges
-     │   • user dev (uid 1000), sudo removed, login shell = pwsh launcher
-     │   • /work            ← workspace bind mount (persistent)
-     │   • /home/dev        ← named volume gleiphnir-home-<user> (~ persists)
-     │   • /opt/mise-shared ← shared volume sandbox-mise (tools download once)
-     │   • tools via mise: node/python/go/dotnet/nvim(+AstroNvim)/yazi/fzf/fd/
-     │     rg/delta/hunk/leaf/carapace/atuin/opencode/pwsh ...
-     └─ Users:
-         • admin (your key, full sudo) — manages users + firewall
-         • sandbox users — login shell = sandbox-shell → container(pwsh)
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '14px' }}}%%
+flowchart TB
+    subgraph HOST["Host Machine"]
+        style HOST fill:#1e1e2e,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4
+        
+        MISE["mise tasks + pwsh scripts"]
+        style MISE fill:#cba6f7,stroke:#cba6f7,color:#1e1e2e
+        
+        QEMU["QEMU VM — Ubuntu 26.04"]
+        style QEMU fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+        
+        LGTM["LGTM container<br/>Grafana + Loki + Tempo + Prometheus"]
+        style LGTM fill:#89dceb,stroke:#89dceb,color:#1e1e2e
+        
+        MISE -->|"prepare, start, manage"| QEMU
+        QEMU -.->|"OTLP :4317"| LGTM
+    end
+    
+    subgraph VM["VM — Ubuntu 26.04"]
+        style VM fill:#1e1e2e,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4
+        
+        UFW["ufw firewall"]
+        style UFW fill:#f38ba8,stroke:#f38ba8,color:#1e1e2e
+        
+        BRIDGE["bridge mode: TAP → br-gleiphnir<br/>DNAT :2222 → VM:22"]
+        style BRIDGE fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+        
+        PODMAN["Podman"]
+        style PODMAN fill:#fab387,stroke:#fab387,color:#1e1e2e
+        
+        OTEL["OTel Collector"]
+        style OTEL fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
+        
+        BRIDGE --> UFW
+        UFW --> PODMAN
+        OTEL --> LGTM
+    end
+    
+    subgraph CONTAINER["Podman Container"]
+        style CONTAINER fill:#1e1e2e,stroke:#fab387,stroke-width:2px,color:#cdd6f4
+        
+        PWSH["pwsh + AstroNvim"]
+        style PWSH fill:#b4befe,stroke:#b4befe,color:#1e1e2e
+        
+        MISE_TOOLS["mise: node/python/go/dotnet/nvim..."]
+        style MISE_TOOLS fill:#f5c2e7,stroke:#f5c2e7,color:#1e1e2e
+        
+        CARAPACE["carapace completions"]
+        style CARAPACE fill:#f5c2e7,stroke:#f5c2e7,color:#1e1e2e
+        
+        PWSH --- MISE_TOOLS
+        PWSH --- CARAPACE
+    end
+    
+    subgraph VOLUMES["Volumes"]
+        style VOLUMES fill:#1e1e2e,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4
+        
+        DATA["data disk /srv/sandbox<br/>per-user workspace"]
+        style DATA fill:#f9e2af,stroke:#f9e2af,color:#1e1e2e
+        
+        HOME_VOL["gleiphnir-home-user<br/>~/.cache, ~/.local, ~/.config"]
+        style HOME_VOL fill:#f9e2af,stroke:#f9e2af,color:#1e1e2e
+        
+        MISE_VOL["sandbox-mise<br/>shared toolchains"]
+        style MISE_VOL fill:#f9e2af,stroke:#f9e2af,color:#1e1e2e
+    end
+    
+    PODMAN --> PWSH
+    PODMAN --- DATA
+    PODMAN --- HOME_VOL
+    PODMAN --- MISE_VOL
 ```
 
 ## Prerequisites
@@ -142,6 +194,7 @@ In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP r
 - **Dotfiles via mise**: bashrc / pwsh profile / gitconfig ship at `/etc/sandbox/dotfiles` and are linked by the `dotfiles` mise task on each start. Personal overrides: put same-named files in `/work/dotfiles/`.
 - **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi file manager, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
 - **Shell completion**: Carapace provides tab completion for all `sandbox-*` commands (with `gle-*` aliases) and enhanced mise task completions. Specs ship in the container image at `/etc/carapace/specs/`.
+- **OTel tracing**: host-side pwsh scripts emit OpenTelemetry spans via `otel-cli` (installed via mise) — visible in Grafana Tempo when observability is enabled.
 
 ## Sandbox users & workspaces
 

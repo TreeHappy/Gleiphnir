@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.network_up' @{ 'script.name' = 'network-up.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if ($IsWin) {
     Write-Host "network-up is not applicable on native Windows — the VM uses QEMU user-mode NAT"
     Write-Host "(no host networking changes are made; the guest firewall handles filtering)."
@@ -127,4 +129,9 @@ Write-Host "Bridge $BRIDGE_NAME ($BRIDGE_ADDR/$BRIDGE_NETMASK) → VM $VM_IP/24 
 Write-Host "Host forward: 0.0.0.0:$HOST_SSH_FORWARD_PORT → ${VM_IP}:22 (real source IPs preserved via DNAT)"
 if (-not [string]::IsNullOrEmpty($env:PHYS_IF)) {
     Write-Host "Physical IF $($env:PHYS_IF) enslaved — VM appears on LAN (DHCP from LAN)."
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

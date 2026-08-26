@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.gen_key' @{ 'script.name' = 'gen-key.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 $keyDir = Split-Path -Parent $ADMIN_SSH_KEY_PATH
 if (-not (Test-Path -LiteralPath $keyDir)) { New-Item -ItemType Directory -Path $keyDir -Force | Out-Null }
 
@@ -20,3 +22,8 @@ if (-not $IsWin) {
 }
 Write-Host "Done."
 Get-Item -LiteralPath $ADMIN_SSH_PRIV_PATH, $ADMIN_SSH_KEY_PATH | Format-Table Name, Length, LastWriteTime -AutoSize
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

@@ -124,13 +124,16 @@ Host-side convenience tasks: `mise run tools:list`, `mise run tools:info TOOL=..
 When `OBSERVABILITY_ENABLED=true` in `config/sandbox.env`, a **Grafana LGTM** stack provides dashboards for session input, HTTP traffic, system metrics, and user lifecycle events. The LGTM container runs on the **host** (not inside the VM) and receives OTLP telemetry from an OTel Collector running inside the VM.
 
 Key components:
-- **LGTM container** (`gleiphnir-lgtm`): Grafana + Loki + Tempo + Prometheus + OTel Collector, managed by `vm/scripts/observability.ps1`
+- **LGTM container** (`gleiphnir-lgtm`): Grafana + Loki + Tempo + Prometheus, managed by `vm/scripts/observability.ps1`
 - **OTel Collector** (inside VM): reads log files + scrapes node-exporter, ships to LGTM via OTLP
 - **node-exporter** (inside VM): system metrics (CPU, RAM, disk, network)
-- **mitmproxy** (inside VM): MITM HTTP proxy for traffic capture
+- **mitmproxy** (inside VM): MITM HTTP proxy for traffic capture with OTel span generation
 - **session-logger** (inside VM): PTY wrapper for session input capture
 - **audit logs** (inside VM): JSONL audit trail for user add/remove events
+- **otel-cli** (host): all host-side pwsh scripts emit OTel spans via [otel-cli](https://github.com/equinix-labs/otel-cli), installed via mise. Spans are exported to the OTel Collector when observability is enabled.
 
 Data flow: `guest scripts → JSONL files → OTel Collector → OTLP → LGTM container → Grafana UI`
+
+Host pwsh scripts: `script start → otel-cli span start → work → otel-cli span end → LGTM container → Grafana Tempo`
 
 See `docs/observability.md` for setup guide.

@@ -17,6 +17,8 @@ function script:Check-Bin([string[]]$bins) {
     $script:missing = 1
 }
 
+Start-OtelSpan 'gleiphnir.deps' @{ 'script.name' = 'deps.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if ($IsWin) {
     Write-Host "  Required on Windows: pwsh, git, curl, ssh, qemu-system-x86_64, qemu-img, python3 (+pycdlib)"
     Check-Bin @('git')
@@ -70,7 +72,7 @@ if (Get-Command mise -ErrorAction SilentlyContinue) {
     & mise --version
 }
 $qemuCmd = Get-Command $QEMU_BIN -ErrorAction SilentlyContinue
-if ($qemuCmd) {
+    if ($qemuCmd) {
     Write-Host ""
     Write-Host "==> QEMU"
     & $QEMU_BIN --version | Select-Object -First 1
@@ -80,5 +82,10 @@ if ($qemuCmd) {
     } else {
         Write-Host "Accel: WHPX assumed (set QEMU_ACCEL=tcg to force emulation)"
     }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }
 exit 0

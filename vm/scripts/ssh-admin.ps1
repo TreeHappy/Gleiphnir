@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.ssh_admin' @{ 'script.name' = 'ssh-admin.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 $extraArgs = @($args)
 
 if ($env:NETWORK_MODE -eq 'user') {
@@ -20,3 +22,8 @@ Write-Host "Direct connect failed — trying host forward 127.0.0.1:$HOST_SSH_FO
 $fwd = @() + (Get-KeyArgs) + (Get-SshCommonArgs) + @('-p', $HOST_SSH_FORWARD_PORT) + "$($env:ADMIN_USER)@127.0.0.1" + $extraArgs
 & ssh @fwd
 exit $LASTEXITCODE
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

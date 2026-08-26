@@ -16,6 +16,7 @@ yazi = "latest"         # file manager TUI
 leaf = "github:RivoLink/leaf"  # markdown reader (fallback: npm:@rivolink/leaf)
 carapace = "latest"     # multi-shell completions
 atuin = "latest"        # shell history
+"github:equinix-labs/otel-cli" = "latest"   # OTel tracing for shell scripts
 
 # Editors / shells / agents
 neovim = "latest"

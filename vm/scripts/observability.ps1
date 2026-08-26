@@ -4,6 +4,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'observability.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 $CONTAINER_NAME = 'gleiphnir-lgtm'
 $VOLUME_NAME    = 'gleiphnir-lgtm-data'
 
@@ -158,4 +162,9 @@ switch ($action) {
         else { Write-Host "Open manually: $url" }
     }
     default { Write-Host "Usage: observability.ps1 <start|stop|status|restart|clean|open>" }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

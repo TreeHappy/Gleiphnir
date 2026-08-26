@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.stop_vm' @{ 'script.name' = 'stop-vm.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 function script:Send-MonitorQuit {
     try {
         if (Test-MonitorTcp) {
@@ -60,4 +62,9 @@ if ($pids.Count -gt 0) {
 # cleanup
 foreach ($f in @($PID_FILE, $MONITOR_SOCK)) {
     if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force }
+}
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.wait_ssh' @{ 'script.name' = 'wait-ssh.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 $timeoutSecs = 600
 $interval    = 5
 $elapsed     = 0
@@ -51,3 +53,8 @@ while ($sshElapsed -lt $sshTimeout) {
 }
 
 Write-Error "Timed out after ${sshTimeout}s SSH attempts (TCP was open).`nCheck: mise run vm:console or mise run vm:info"
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

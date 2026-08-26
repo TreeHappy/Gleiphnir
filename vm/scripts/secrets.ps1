@@ -5,6 +5,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'secrets.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 $SECRETS_PLAIN = Join-Path $RepoRoot 'config/secrets.env'
 $SECRETS_ENC   = Join-Path $RepoRoot 'config/secrets.env.enc'
 $VM_SECRETS    = '/var/lib/sandbox/secrets.env'
@@ -121,4 +125,9 @@ switch ($action) {
     'list'    { List-Secrets }
     'status'  { Show-Status }
     default   { Show-Usage }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

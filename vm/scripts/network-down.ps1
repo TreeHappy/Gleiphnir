@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.network_down' @{ 'script.name' = 'network-down.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if ($IsWin) {
     Write-Host "network-down is not applicable on native Windows — nothing was created on the host."
     exit 0
@@ -60,3 +62,8 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host "Done."
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

@@ -3,6 +3,8 @@ param([switch]$All)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.clean_vm' @{ 'script.name' = 'clean-vm.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if (Test-VmRunning) {
     Write-Error "VM is running — stop it first: mise run vm:stop"
 }
@@ -24,4 +26,9 @@ if (Test-Path -LiteralPath $IMAGES_DIR) {
     Get-ChildItem -LiteralPath $IMAGES_DIR | Format-Table Name, @{n='Size';e={"{0:N1} MB" -f ($_.Length/1MB)}} -AutoSize
 } else {
     Write-Host "(empty)"
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

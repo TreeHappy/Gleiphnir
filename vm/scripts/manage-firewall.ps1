@@ -2,6 +2,10 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+$spanAction = if ($args.Count -gt 0) { $args[0] } else { 'default' }
+Start-OtelSpan "gleiphnir.$spanAction" @{ 'script.name' = 'manage-firewall.ps1'; 'script.action' = $spanAction; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
+
 $action = ''; $ip = ''
 $positional = @()
 foreach ($a in $args) {
@@ -32,4 +36,9 @@ switch ($action) {
     default {
         Write-Error "Usage: manage-firewall.ps1 allow|deny|remove|enforce|list [IP]"
     }
+}
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
 }

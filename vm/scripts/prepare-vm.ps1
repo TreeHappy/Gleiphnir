@@ -5,6 +5,8 @@ $ErrorActionPreference = 'Stop'
 Write-Host "==> Preparing VM (mode: $($env:NETWORK_MODE))"
 
 Require-BaseImage
+Start-OtelSpan 'gleiphnir.prepare_vm' @{ 'script.name' = 'prepare-vm.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if (-not (Test-Path -LiteralPath $IMAGES_DIR)) { New-Item -ItemType Directory -Path $IMAGES_DIR -Force | Out-Null }
 
 # ── detect TUN availability for bridge mode ────────────────────────────────
@@ -159,3 +161,8 @@ Write-Host "VM preparation complete. Disks:"
 Get-ChildItem -LiteralPath $IMAGES_DIR | Format-Table Name, @{n='Size';e={"{0:N1} MB" -f ($_.Length/1MB)}} -AutoSize
 Write-Host ""
 Write-Host "Next: mise run vm:start  (or mise run up for full bring-up)"
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

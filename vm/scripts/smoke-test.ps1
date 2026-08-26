@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.smoke' @{ 'script.name' = 'smoke-test.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 Write-Host "=== Gleiphnir smoke test ==="
 Write-Host "VM: $VM_IP  Forward: :$HOST_SSH_FORWARD_PORT  Mode: $($env:NETWORK_MODE)"
 Write-Host ""
@@ -104,3 +106,8 @@ Write-Host ""
 Write-Host "=== Results: $script:pass passed, $script:fail failed ==="
 if ($script:fail -gt 0) { Write-Host "Some checks failed — see above."; exit 1 }
 Write-Host "All smoke checks passed."
+    End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}

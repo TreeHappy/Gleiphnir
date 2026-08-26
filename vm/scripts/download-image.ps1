@@ -2,6 +2,8 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+Start-OtelSpan 'gleiphnir.download_image' @{ 'script.name' = 'download-image.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
+try {
 if (-not (Test-Path -LiteralPath $IMAGES_DIR)) { New-Item -ItemType Directory -Path $IMAGES_DIR -Force | Out-Null }
 
 if (Test-Path -LiteralPath $BASE_IMAGE) {
@@ -36,3 +38,8 @@ Write-Host "Verifying image:"
 Get-Item -LiteralPath $BASE_IMAGE | ForEach-Object { "{0,10:N1} MB  {1}" -f ($_.Length / 1MB), $_.FullName }
 Write-Host ""
 Write-Host "Done. Next: mise run vm:prepare"
+End-OtelSpan 'OK'
+} catch {
+    End-OtelSpan 'ERROR' $_.Exception.Message
+    throw
+}
