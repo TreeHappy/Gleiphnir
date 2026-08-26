@@ -26,6 +26,8 @@ def main() -> int:
         "__PROFILE_PS1_CONTENT__": f"{repo}/container/files/dotfiles/profile.ps1",
         "__GITCONFIG_CONTENT__": f"{repo}/container/files/dotfiles/gitconfig",
         "__START_PWSH_CONTENT__": f"{repo}/container/files/start-pwsh.sh",
+        "__SESSION_LOGGER_CONTENT__": f"{repo}/vm/guest/bin/sandbox-session-logger",
+        "__SANDBOX_PROXY_CONTENT__": f"{repo}/vm/guest/bin/sandbox-proxy",
     }
 
     p = pathlib.Path(tmpdir) / "user-data"

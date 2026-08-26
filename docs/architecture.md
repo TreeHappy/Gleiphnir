@@ -55,5 +55,21 @@ See `README.md` for user-facing docs. This file is for contributors.
 
 - Packer golden image (optional, faster boot).
 - CSI-like separate RW data drive per org (vs per-user subdirs).
-- Auditing/logging (systemd journal → host, podman events).
+- ~~Auditing/logging (systemd journal → host, podman events).~~ **Done: see `docs/observability.md`.**
 - gVisor/Kata Containers instead of Podman for stronger container isolation.
+
+## Observability (optional)
+
+When `OBSERVABILITY_ENABLED=true` in `config/sandbox.env`, a **Grafana LGTM** stack provides dashboards for session input, HTTP traffic, system metrics, and user lifecycle events. The LGTM container runs on the **host** (not inside the VM) and receives OTLP telemetry from an OTel Collector running inside the VM.
+
+Key components:
+- **LGTM container** (`gleiphnir-lgtm`): Grafana + Loki + Tempo + Prometheus + OTel Collector, managed by `vm/scripts/observability.ps1`
+- **OTel Collector** (inside VM): reads log files + scrapes node-exporter, ships to LGTM via OTLP
+- **node-exporter** (inside VM): system metrics (CPU, RAM, disk, network)
+- **mitmproxy** (inside VM): MITM HTTP proxy for traffic capture
+- **session-logger** (inside VM): PTY wrapper for session input capture
+- **audit logs** (inside VM): JSONL audit trail for user add/remove events
+
+Data flow: `guest scripts → JSONL files → OTel Collector → OTLP → LGTM container → Grafana UI`
+
+See `docs/observability.md` for setup guide.

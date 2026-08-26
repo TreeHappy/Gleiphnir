@@ -87,6 +87,12 @@ if podman run --help 2>&1 | grep -q "userns"; then
   HAS_KEEP_ID=1
 fi
 
+# ── observability: check if enabled ─────────────────────────────────────────
+OBS_ENABLED=0
+if [ -f /var/lib/sandbox/observability-enabled ]; then
+  OBS_ENABLED=1
+fi
+
 COMMON_ARGS=(
   --rm -it
   --read-only
@@ -114,19 +120,47 @@ COMMON_ARGS=(
   --hostname "sandbox"
 )
 
+# Add observability proxy env vars if enabled
+if [ "$OBS_ENABLED" = "1" ] && [ -f /var/lib/sandbox/observability-enabled ]; then
+  # Check if mitmproxy is running
+  if pgrep -x mitmdump >/dev/null 2>&1; then
+    # Get the VM's IP so containers can reach the proxy (can't use 127.0.0.1 inside containers)
+    _PROXY_HOST="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')"
+    _PROXY_HOST="${_PROXY_HOST:-$(hostname -I | awk '{print $1}')}"
+    _PROXY_HOST="${_PROXY_HOST:-127.0.0.1}"
+    COMMON_ARGS+=(
+      -e http_proxy="http://${_PROXY_HOST}:8080"
+      -e https_proxy="http://${_PROXY_HOST}:8080"
+      -e HTTP_PROXY="http://${_PROXY_HOST}:8080"
+      -e HTTPS_PROXY="http://${_PROXY_HOST}:8080"
+      -e no_proxy="localhost,127.0.0.1,${_PROXY_HOST},10.0.2.2,192.168.100.0/24"
+    )
+  fi
+fi
+
+# ── launch container ─────────────────────────────────────────────────────────
 if [ "$USE_ROOTLESS" = "1" ]; then
   # Rootless: preserve host UID for volume ownership via keep-id if available
   if [ "$HAS_KEEP_ID" = "1" ]; then
-    exec podman run "${COMMON_ARGS[@]}" --userns keep-id "$CONTAINER_IMAGE"
+    PODMAN_CMD=(podman run "${COMMON_ARGS[@]}" --userns keep-id "$CONTAINER_IMAGE")
   else
-    exec podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE"
+    PODMAN_CMD=(podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE")
   fi
 else
   # Rootful fallback via sudo (admin must have allowed this user in sudoers for podman)
   if command -v sudo >/dev/null 2>&1; then
-    exec sudo podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE"
+    PODMAN_CMD=(sudo podman run "${COMMON_ARGS[@]}" "$CONTAINER_IMAGE")
   else
     echo "podman not usable for user $USER_NAME (neither rootless nor sudo podman available)" >&2
     exit 1
   fi
+fi
+
+# Wrap with session logger if observability is enabled
+if [ "$OBS_ENABLED" = "1" ] && [ -x /usr/local/bin/sandbox-session-logger ]; then
+  export SESSION_ID="$(date +%s)-$$"
+  export USER_NAME
+  exec /usr/local/bin/sandbox-session-logger "${PODMAN_CMD[@]}"
+else
+  exec "${PODMAN_CMD[@]}"
 fi

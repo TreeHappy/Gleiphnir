@@ -44,6 +44,11 @@ if [ -d "$MISE_DATA_DIR/shims" ]; then
   export PATH="$MISE_DATA_DIR/shims:$PATH"
 fi
 
+# ── observability: emit session start event ──────────────────────────────────
+if [ -d /var/log/sandbox ]; then
+  echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\",\"event\":\"container_start\",\"user\":\"${USER:-dev}\",\"hostname\":\"$(hostname)\",\"workspace\":\"/work\"}" >> /var/log/sandbox/session-start.jsonl 2>/dev/null || true
+fi
+
 # If no command given, default is pwsh (via launcher; bash fallback offline).
 # Exec so signals work.
 if [ $# -eq 0 ]; then

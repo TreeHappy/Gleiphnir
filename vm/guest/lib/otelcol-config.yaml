@@ -1,0 +1,106 @@
+# OTel Collector config for Gleiphnir VM-side telemetry
+# Deployed inside the VM via cloud-init. Ships logs and metrics to the
+# LGTM container on the host.
+receivers:
+  # OTLP receiver — accepts direct OTLP from container entrypoints
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Filelog receiver — tails session logs and proxy logs for Loki
+  filelog/session_logs:
+    include: ["/var/log/sandbox/session-*.jsonl"]
+    fingerprint_size: 1kb
+    max_log_size: 1MB
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: "2006-01-02T15:04:05.999999999Z"
+    attributes:
+      signal.type: logs
+      source: session
+
+  filelog/proxy_logs:
+    include: ["/var/log/sandbox/proxy-*.jsonl"]
+    fingerprint_size: 1kb
+    max_log_size: 1MB
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: "2006-01-02T15:04:05.999999999Z"
+    attributes:
+      signal.type: logs
+      source: proxy
+
+  filelog/audit_logs:
+    include: ["/var/log/sandbox/audit.jsonl"]
+    fingerprint_size: 1kb
+    max_log_size: 1MB
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: "2006-01-02T15:04:05.999999999Z"
+    attributes:
+      signal.type: logs
+      source: audit
+
+  # Prometheus receiver — scrapes node-exporter inside the VM
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: node-exporter
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:9100']
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+  # Add common resource attributes to all signals
+  resource:
+    attributes:
+      - key: service.name
+        value: gleiphnir-vm
+        action: upsert
+      - key: service.namespace
+        value: gleiphnir
+        action: upsert
+
+exporters:
+  # Send all telemetry to the LGTM container on the host
+  otlp/lgtm:
+    endpoint: "__LGTM_HOST__:4317"
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+
+  # Also expose metrics locally for debugging
+  prometheus/debug:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp, filelog/session_logs, filelog/proxy_logs, filelog/audit_logs]
+      processors: [resource, batch]
+      exporters: [otlp/lgtm]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [resource, batch]
+      exporters: [otlp/lgtm, prometheus/debug]
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlp/lgtm]

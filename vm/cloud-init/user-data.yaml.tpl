@@ -24,6 +24,8 @@ packages:
   - curl
   - unzip
   - git
+  - prometheus-node-exporter
+  - mitmproxy
 
 # ── storage: dedicated data disk at /srv/sandbox ──────────────────────────
 disk_setup:
@@ -104,6 +106,22 @@ __GITCONFIG_CONTENT__
     content: |
 __START_PWSH_CONTENT__
 
+  # ── observability: session logger, HTTP proxy, OTel config ─────────────
+  # session-logger (PTY wrapper for keystroke capture)
+  - path: /usr/local/bin/sandbox-session-logger
+    permissions: '0755'
+    content: |
+__SESSION_LOGGER_CONTENT__
+
+  # HTTP proxy (mitmproxy wrapper for traffic capture)
+  - path: /usr/local/bin/sandbox-proxy
+    permissions: '0755'
+    content: |
+__SANDBOX_PROXY_CONTENT__
+
+  # OTel Collector config (deployed by deploy-observability.ps1 at runtime)
+  # Placeholder — actual config is deployed via SSH after VM boot
+
   # sshd hardening — ForceCommand for sandbox users via Match blocks (appended later)
   - path: /etc/ssh/sshd_config.d/99-gleiphnir.conf
     permissions: '0644'
@@ -143,6 +161,8 @@ runcmd:
   - mkdir -p /srv/sandbox
   - chmod 755 /srv/sandbox
   - mkdir -p /var/lib/sandbox
+  - mkdir -p /var/log/sandbox
+  - chmod 1777 /var/log/sandbox
   # Ensure subuid/subgid exist for admin (needed for rootless podman even for admin itself)
   - grep -q "^__ADMIN_USER__:" /etc/subuid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subuid
   - grep -q "^__ADMIN_USER__:" /etc/subgid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subgid

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-proxy — MITM HTTP proxy for traffic observability
+# Runs mitmproxy in regular mode, logging all requests as JSONL to a file.
+# The OTel Collector tails these log files and ships them to Loki.
+set -euo pipefail
+
+LOG_DIR="/var/log/sandbox"
+PROXY_PORT="${PROXY_PORT:-8080}"
+MITM_LOG="${LOG_DIR}/proxy-$(date +%Y%m%d-%H%M%S).jsonl"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+# Create the mitmproxy addon script for JSONL logging
+ADDON=$(mktemp /tmp/mitmlog-XXXXXX.py)
+trap 'rm -f "$ADDON"' EXIT
+
+cat > "$ADDON" <<'ADDONEOF'
+"""mitmproxy addon: log all HTTP requests/responses as JSONL."""
+import json
+import time
+from datetime import datetime, timezone
+from mitmproxy import http
+from mitmproxy.net.http import request as req_mod
+
+class JsonlLogger:
+    def __init__(self):
+        self.log_path = "/var/log/sandbox/proxy-latest.jsonl"
+        # Rotate log file based on time
+        self._rotate_log()
+
+    def _rotate_log(self):
+        now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        self.log_path = f"/var/log/sandbox/proxy-{now}.jsonl"
+        self._rotate_after = time.time() + 3600  # rotate hourly
+
+    def response(self, flow: http.HTTPFlow):
+        now = time.time()
+        if now > getattr(self, '_rotate_after', 0):
+            self._rotate_log()
+
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "http_request",
+            "method": flow.request.method,
+            "url": flow.request.pretty_url,
+            "host": flow.request.host,
+            "port": flow.request.port,
+            "scheme": flow.request.scheme,
+            "request_content_type": flow.request.headers.get("content-type", ""),
+            "request_size": len(flow.request.content) if flow.request.content else 0,
+            "response_status": flow.response.status_code if flow.response else 0,
+            "response_content_type": flow.response.headers.get("content-type", "") if flow.response else "",
+            "response_size": len(flow.response.content) if flow.response and flow.response.content else 0,
+            "duration_ms": round((flow.response.timestamp_end - flow.request.timestamp_start) * 1000) if flow.response and flow.response.timestamp_end else 0,
+        }
+        try:
+            with open(self.log_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            pass
+
+addons = [JsonlLogger()]
+ADDONEOF
+
+echo "[sandbox-proxy] Starting mitmproxy on port $PROXY_PORT ..."
+echo "[sandbox-proxy] Logs: $MITM_LOG"
+
+# Start mitmproxy with the JSONL logging addon
+exec mitmdump \
+    --listen-host 0.0.0.0 \
+    --listen-port "$PROXY_PORT" \
+    --set upstream_cert=false \
+    --ssl-insecure \
+    --set connection_strategy=lazy \
+    --set keep_host_header=true \
+    -s "$ADDON" \
+    2>&1 | sed 's/^/[sandbox-proxy] /'

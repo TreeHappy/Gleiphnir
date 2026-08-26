@@ -79,6 +79,19 @@ Check 'sandbox-firewall list works'            { Invoke-AdminSsh -Command 'sudo 
 Check 'sandbox-firewall allow 192.0.2.1'       { Invoke-AdminSsh -Command 'sudo /usr/local/bin/sandbox-firewall allow 192.0.2.1' }
 Check 'sandbox-firewall remove 192.0.2.1'      { Invoke-AdminSsh -Command 'sudo /usr/local/bin/sandbox-firewall remove 192.0.2.1' }
 
+# ── observability checks (only if enabled) ──────────────────────────────────
+if ($env:OBSERVABILITY_ENABLED -eq 'true') {
+    Write-Host ""
+    Write-Host "--- observability checks ---"
+    $lgtmStatus = & podman inspect -f '{{.State.Running}}' gleiphnir-lgtm 2>$null
+    Check 'LGTM container running'              { $LASTEXITCODE -eq 0 -and $lgtmStatus -eq 'true' }
+    Check 'Grafana reachable'                   { try { $r = Invoke-WebRequest -Uri "http://localhost:$($env:OBSERVABILITY_GRAFANA_PORT)/api/health" -TimeoutSec 5 -UseBasicParsing; $r.StatusCode -eq 200 } catch { $false } }
+    Check 'OTel Collector active in VM'         { Invoke-AdminSshWithFallback -Command 'systemctl is-active otelcol 2>/dev/null' }
+    Check 'node-exporter installed in VM'       { Invoke-AdminSshWithFallback -Command 'command -v node_exporter >/dev/null' }
+    Check 'session log dir exists in VM'        { Invoke-AdminSshWithFallback -Command 'test -d /var/log/sandbox' }
+    Check 'observability marker exists in VM'   { Invoke-AdminSshWithFallback -Command 'test -f /var/lib/sandbox/observability-enabled' }
+}
+
 # cleanup
 Invoke-AdminSshWithFallback -Command 'sudo rm -rf /srv/sandbox/.smoke' | Out-Null
 if ($ephemeral) {

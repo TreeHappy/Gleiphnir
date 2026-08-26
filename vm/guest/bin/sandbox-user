@@ -120,6 +120,13 @@ cmd_add() {
   # Lock password auth for this user (keys only)
   passwd -l "$user" >/dev/null 2>&1 || true
 
+  # Audit log (JSONL)
+  if [ -d /var/log/sandbox ]; then
+    local admin_user
+    admin_user="$(id -un)"
+    echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\",\"event\":\"user_add\",\"user\":\"${user}\",\"admin\":\"${admin_user}\",\"success\":true}" >> /var/log/sandbox/audit.jsonl 2>/dev/null || true
+  fi
+
   echo "User $user created."
   echo "  home:      $home"
   echo "  workspace: $work"
@@ -151,6 +158,14 @@ cmd_remove() {
   # Optionally keep workspace; we remove it (admin can recover from backup)
   rm -rf "/srv/sandbox/$user"
   loginctl disable-linger "$user" 2>/dev/null || true
+
+  # Audit log (JSONL)
+  if [ -d /var/log/sandbox ]; then
+    local admin_user
+    admin_user="$(id -un)"
+    echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\",\"event\":\"user_remove\",\"user\":\"${user}\",\"admin\":\"${admin_user}\",\"success\":true}" >> /var/log/sandbox/audit.jsonl 2>/dev/null || true
+  fi
+
   echo "User $user removed."
 }
 

@@ -67,6 +67,13 @@ Set-Default 'SEED_ISO'              'vm/images/seed.iso'
 Set-Default 'SYSTEM_DISK'           'vm/images/system.qcow2'
 Set-Default 'DATA_DISK'             'vm/images/data.qcow2'
 Set-Default 'CONTAINER_IMAGE'       'localhost/sandbox:latest'
+Set-Default 'OBSERVABILITY_ENABLED'            'false'
+Set-Default 'OBSERVABILITY_LGTM_IMAGE'         'grafana/otel-lgtm:latest'
+Set-Default 'OBSERVABILITY_GRAFANA_PORT'        '3000'
+Set-Default 'OBSERVABILITY_OTLP_PORT'           '4317'
+Set-Default 'OBSERVABILITY_PROM_PORT'           '9090'
+Set-Default 'OBSERVABILITY_PROXY_ENABLED'       'true'
+Set-Default 'OBSERVABILITY_SESSION_LOGGING'     'true'
 
 $script:IsWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 

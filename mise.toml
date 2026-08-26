@@ -140,6 +140,37 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-bui
 description = "Show container image info from inside the VM"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/container-info.ps1'"
 
+# ── observability (Grafana LGTM) ───────────────────────────────────────────
+[tasks.'obs:start']
+description = "Start LGTM container on host and deploy agents to VM"
+run = """
+set -e
+pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' start
+if [ "$(echo $OBSERVABILITY_ENABLED)" = "true" ]; then
+  pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/deploy-observability.ps1'
+fi
+"""
+
+[tasks.'obs:stop']
+description = "Stop LGTM container on host"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' stop"
+
+[tasks.'obs:status']
+description = "Show LGTM observability status"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' status"
+
+[tasks.'obs:open']
+description = "Open Grafana dashboard in browser"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' open"
+
+[tasks.'obs:deploy']
+description = "Deploy observability agents to running VM (after obs:start)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/deploy-observability.ps1'"
+
+[tasks.'obs:clean']
+description = "Remove LGTM container and data volume"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' clean"
+
 # ── verification ───────────────────────────────────────────────────────────
 [tasks.smoke]
 description = "Quick smoke test (requires running VM)"
@@ -147,7 +178,7 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/smoke-test.ps
 
 # ── convenience ────────────────────────────────────────────────────────────
 [tasks.up]
-description = "Full bring-up — deps check, download image, prepare, start, wait for SSH"
+description = "Full bring-up — deps check, download image, prepare, start, wait for SSH, optionally start observability"
 run = """
 set -e
 mise run deps
@@ -155,12 +186,19 @@ mise run image:download
 mise run vm:prepare
 mise run vm:start
 mise run vm:ssh:wait
+if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
+  echo "--- Starting observability stack ---"
+  mise run obs:start
+fi
 """
 
 [tasks.down]
-description = "Stop VM and tear down bridge/TAP"
+description = "Stop VM, tear down bridge/TAP, stop observability"
 run = """
 set -e
 mise run vm:stop
 mise run network:down
+if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
+  mise run obs:stop
+fi
 """

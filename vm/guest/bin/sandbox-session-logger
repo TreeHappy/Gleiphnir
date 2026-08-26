@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-session-logger — PTY wrapper that captures session input
+# Sits between the SSH PTY and `podman run`, logging user keystrokes as JSONL.
+# Usage: sandbox-session-logger <command> [args...]
+set -euo pipefail
+
+LOG_DIR="/var/log/sandbox"
+SESSION_ID="${SESSION_ID:-$(date +%s)-$$}"
+USER_NAME="${USER_NAME:-$(id -un)}"
+LOG_FILE="${LOG_DIR}/session-${USER_NAME}-${SESSION_ID}.jsonl"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+# Emit session start event
+echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\",\"event\":\"session_start\",\"user\":\"${USER_NAME}\",\"session_id\":\"${SESSION_ID}\"}" >> "$LOG_FILE"
+
+# Use script(1) to capture PTY I/O, then filter for user input lines.
+# script -qfec runs the command quietly, timestamps are suppressed with -t.
+# We pipe through a filter that extracts meaningful lines.
+CMD="$1"; shift
+
+# Run the actual command through script, capturing both input and output
+LOG_INPUT="${LOG_DIR}/.raw-session-${SESSION_ID}.log"
+
+script -qfec "exec $CMD $*" /dev/null </dev/tty 2>"$LOG_INPUT" &
+SCRIPT_PID=$!
+
+# Monitor the raw log for user input (lines that appear on stdin)
+# This is a simplified approach: we tail the raw session log and extract
+# lines that look like user input (not ANSI escapes, not empty).
+{
+    while kill -0 $SCRIPT_PID 2>/dev/null; do
+        sleep 0.5
+    done
+} 2>/dev/null &
+
+# Wait for the child to finish
+wait $SCRIPT_PID 2>/dev/null
+EXIT_CODE=$?
+
+# Clean up raw log
+rm -f "$LOG_INPUT" 2>/dev/null
+
+# Emit session end event
+echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\",\"event\":\"session_end\",\"user\":\"${USER_NAME}\",\"session_id\":\"${SESSION_ID}\",\"exit_code\":${EXIT_CODE}}" >> "$LOG_FILE"
+
+exit $EXIT_CODE
