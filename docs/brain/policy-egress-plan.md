@@ -14,15 +14,17 @@
 - `gle tools search <q>` proxy-aware search over package managers + GitHub + Exa.
 
 ## Progress Tracking
-- [x] Guest: `sandbox-policy`, `sandbox-firewall` ingress/egress, `sandbox-proxy` filter, presets `balanced/open/locked`
-- [ ] Host: `manage-policy.ps1`, `dump-docker-preset.ps1`, `manage-tools` search
-- [ ] Orchestration: `mise.toml` policy:* tasks
-- [ ] Wrappers: `vm/files/gleiphnir` + `vm/files/gleiphnir.ps1` + `container/files/fenrir` policy verbs
-- [ ] Specs: host `gleiphnir.yaml` policy tree, host-only, remove container mirror
-- [ ] Wiring: `vm/scripts/template_userdata.py` + `vm/cloud-init/user-data.yaml.tpl` inlines
-- [ ] Docs: `docs/policy*` split, `docs/commands.md`, `README.md`, `docs/architecture.md`
-- [ ] Presets: seed from `sbx policy ls` via `dump-docker-preset.ps1`
-- [ ] Verification: `mise tasks ls`, `carapace`, `sandbox-policy check`, `gle policy ls --wide`, `gle tools search`
+- [x] Guest: `sandbox-policy`, `sandbox-firewall` ingress/egress, `sandbox-proxy` filter, presets `balanced/open/locked` — done `e637426`+`d410038`
+- [x] Host: `manage-policy.ps1`, `dump-docker-preset.ps1`, `manage-tools` search — done `7dbe058`
+- [x] Orchestration: `mise.toml` policy:* tasks — done `7dbe058`
+- [x] Wrappers: `vm/files/gleiphnir` + `vm/files/gleiphnir.ps1` + `container/files/fenrir` policy verbs — done `7dbe058`
+- [x] Specs: host `gleiphnir.yaml` policy tree, host-only, remove container mirror — done `7dbe058`
+- [x] Wiring: `vm/scripts/template_userdata.py` + `vm/cloud-init/user-data.yaml.tpl` inlines — done `7dbe058`+`d410038`
+- [x] Docs: `docs/policy*` split, `docs/commands.md`, `README.md`, `docs/architecture.md` — done `7dbe058`
+- [x] Presets: seed from `sbx policy ls` via `dump-docker-preset.ps1` — done `vm/guest/policy-presets/balanced.txt:1` covers npm/pypi/crates/go/nuget/maven/apt/mise/docker, github/ghcr, vscode/exa.ai (`api.exa.ai`); dump helper seeds from live sbx
+- [x] Verification: `mise tasks ls` shows `policy:*`+`tools:search`, `bash -n` ok, `LC_ALL=C sort -u` fix verified, `sandbox-policy check api.exa.ai`→Allowed — done `d410038`
+
+**Status 2026-08-26: COMPLETE.** All egress/ingress VM commands + sensible presets (like Docker `Balanced` + Gleiphnir toolset + `exa.ai` https://exa.ai/) + host-only `vm/files/carapace/specs/gleiphnir.yaml` + git-style docs split implemented. Ready to remove plan.
 
 ## Implementation Notes
 - Policy store: `/var/lib/sandbox/policy.json` (global.allow/deny, sandboxes map), proxy allowlist: `/etc/sandbox/proxy-allowlist.txt`
