@@ -213,7 +213,7 @@ Domains matched with `*.host` / `**`; deny wins. Proxy (`mitmproxy` `8080`) enfo
 - **Per-user home volume** (`gleiphnir-home-<user>`): `~/.cache`, `~/.local` (atuin history!), `~/.config` persist across restarts.
 - **Dotfiles via mise**: bashrc / pwsh profile / gitconfig ship at `/etc/sandbox/dotfiles` and are linked by the `dotfiles` mise task on each start. Personal overrides: put same-named files in `/work/dotfiles/`.
 - **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi/yasi file manager, gdu disk analyzer, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
-- **Shell completion**: Carapace provides nested tab completion for **Fenrir** (`fenrir`/`fen`, in-container → `gdu`/`yazi`, spec `container/files/carapace/specs/fenrir.yaml` → `/etc/carapace/specs`) and **Gleiphnir** (`gleiphnir`/`gle`, host → `mise run …`, **host-only** spec `vm/files/carapace/specs/gleiphnir.yaml` → `~/.config/carapace/specs/` via `vm/scripts/`) plus `mise` (`mise.yaml`). Specs never run tools — they only describe nested `commands` for `carapace` (`CARAPACE_SPEC_DIR=/etc/carapace/specs` via `bashrc:23`). See `docs/commands.md` and `docs/policy.md` (host spec: `vm/...` not `container/...`).
+- **Shell completion**: Carapace provides nested tab completion for **Fenrir** (`fenrir`/`fen`, in-container → `gdu`/`yazi`, spec `container/files/carapace/specs/fenrir.yaml` → `/etc/carapace/specs`) and **Gleiphnir** (`gleiphnir`/`gle`, host → `mise run …`, **host-only** spec `vm/files/carapace/specs/gleiphnir.yaml` → `~/.config/carapace/specs/` via `vm/scripts/` + shim `~/.config/carapace/bin/gleiphnir` via `run:`). Gleiphnir spec is executable (`run: "[mise, run, ...]"`); Fenrir remains completion-only. See `docs/commands.md` and `docs/policy.md` (host spec: `vm/...` not `container/...`).
 - **OTel tracing**: host-side pwsh scripts emit OpenTelemetry spans via `otel-cli` (installed via mise) — visible in Grafana Tempo when observability is enabled.
 
 ## Sandbox users & workspaces
@@ -297,17 +297,16 @@ vm/
   guest/bin/sandbox-firewall        ufw allow/deny/remove/enforce/list          # also via fenrir firewall
   guest/lib/build-container.sh      podman build + shared-mise warm-up
   files/
-    gleiphnir / gleiphnir.ps1       host CLI wrapping mise run (gle alias)
-    carapace/specs/gleiphnir.yaml   nested host completions (gleiphnir/gle)
+    gleiphnir / gleiphnir.ps1       host CLI wrapping mise run (gle alias, legacy fallback)
+    carapace/specs/gleiphnir.yaml   nested host completions + executable run (gleiphnir/gle via carapace --run)
 container/
   Containerfile                     ubuntu:26.04, pwsh launcher as login shell
   entrypoint.sh                     mise bootstrap → dotfiles → exec pwsh
   files/mise.toml                   manifest (tools + env defaults + dotfiles task) — includes gdu + yazi (yasi)
   files/fenrir                      Fenrir in-container CLI (fen alias) → gdu/yazi
-  files/gleiphnir                   Gleiphnir host CLI mirror (gle alias) → mise run
   files/dotfiles/                   bashrc, profile.ps1, gitconfig
   files/start-pwsh.sh               stable pwsh launcher (bash → exec pwsh)
-  files/carapace/specs/             Carapace: fenrir.yaml (fen) + gleiphnir.yaml (gle) + mise.yaml (nested)
+  files/carapace/specs/             Carapace: fenrir.yaml (fen) + mise.yaml (nested) — gleiphnir is host-only (vm/files/...)
 docs/architecture.md                contributor deep-dive
 docs/commands.md                    fenrir/gleiphnir command reference (nested)
 docs/fenrir-gleiphnir-plan.md       implementation plan

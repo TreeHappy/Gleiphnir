@@ -53,7 +53,7 @@ See `docs/policy/*.md` for full flags, examples (npm, pypi, github, exa.ai, per-
 
 ## Specs vs Execution
 
-> **Specs never run tools.** `*carapace/specs/*.yaml` only describes tab-completion (no `run:` field). Execution is via `gleiphnir` shim → `mise run policy:*` → `vm/scripts/manage-policy.ps1` → `ssh admin@VM "sudo sandbox-policy …"` → `ufw` + proxy allowlist. Container `dotfiles` (`container/files/mise.toml:77` + `bashrc:23` `CARAPACE_SPEC_DIR=/etc/carapace/specs`) only loads `fenrir.yaml`+`mise.yaml`; `gleiphnir.yaml` stays on host `~/.config/carapace/specs/` via manual `ln -s`.
+> **Gleiphnir spec is executable:** `vm/files/carapace/specs/gleiphnir.yaml` has `run:` on every leaf (`run: "[mise, run, ...]"` or `run: | #!/bin/sh` for flag-bearing commands). `carapace --run` / shim `~/.config/carapace/bin/gleiphnir` executes `mise run policy:*` → `vm/scripts/manage-policy.ps1` → `ssh admin@VM "sudo sandbox-policy …"` → `ufw` + proxy allowlist. `fenrir.yaml` remains completion-only (`fenrir` bash shim delegates to `gdu`/`yazi`/`sandbox-*`). Container `dotfiles` (`container/files/mise.toml:77` + `bashrc:23` `CARAPACE_SPEC_DIR=/etc/carapace/specs`) only loads `fenrir.yaml`+`mise.yaml`; `gleiphnir.yaml` stays on host `~/.config/carapace/specs/` via manual `ln -s` + shim `PATH` (`~/.config/carapace/bin`). Legacy `vm/files/gleiphnir` shim remains for fallback.
 
 ## See Also
 

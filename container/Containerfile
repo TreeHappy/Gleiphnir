@@ -38,12 +38,10 @@ COPY files/mise.toml /etc/sandbox/mise.toml
 COPY files/dotfiles/ /etc/sandbox/dotfiles/
 COPY files/carapace/ /etc/carapace/
 COPY files/fenrir /usr/local/bin/fenrir
-COPY files/gleiphnir /usr/local/bin/gleiphnir
 COPY files/start-pwsh.sh /usr/local/bin/sandbox-pwsh
 COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
-RUN chmod +x /usr/local/bin/sandbox-pwsh /usr/local/bin/sandbox-entrypoint.sh /usr/local/bin/fenrir /usr/local/bin/gleiphnir \
-    && ln -sfn /usr/local/bin/fenrir /usr/local/bin/fen \
-    && ln -sfn /usr/local/bin/gleiphnir /usr/local/bin/gle
+RUN chmod +x /usr/local/bin/sandbox-pwsh /usr/local/bin/sandbox-entrypoint.sh /usr/local/bin/fenrir \
+    && ln -sfn /usr/local/bin/fenrir /usr/local/bin/fen
 
 USER dev
 WORKDIR /work

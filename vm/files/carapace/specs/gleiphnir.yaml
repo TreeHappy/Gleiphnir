@@ -4,54 +4,70 @@ aliases: [gle]
 commands:
   - name: deps
     description: Check host dependencies (qemu, python/pycdlib, mise, pwsh)
+    run: "[mise, run, deps]"
 
   - name: image
     description: VM image management
     subcommands:
       - name: download
         description: Download Ubuntu cloud image (qcow2)
+        run: "[mise, run, image:download]"
       - name: info
         description: Show downloaded image info
+        run: "[mise, run, image:info]"
 
   - name: network
     description: Host networking (bridge/TAP)
     subcommands:
       - name: up
         description: Create bridge + TAP (Linux hosts, requires sudo)
+        run: "[mise, run, network:up]"
       - name: down
         description: Remove bridge + TAP (Linux hosts, requires sudo)
+        run: "[mise, run, network:down]"
       - name: status
         description: Show bridge/TAP/iptables status
+        run: "[mise, run, network:status]"
 
   - name: vm
     description: VM lifecycle
     subcommands:
       - name: prepare
         description: Build seed ISO and data disk from cloud-init templates
+        run: "[mise, run, vm:prepare]"
       - name: start
         description: Start the VM (creates bridge if needed on Linux, then launches QEMU)
+        run: "[mise, run, vm:start]"
       - name: stop
         description: Stop the VM gracefully (QEMU monitor quit)
+        run: "[mise, run, vm:stop]"
       - name: kill
         description: Force-kill QEMU if vm:stop hangs
+        run: "[mise, run, vm:kill]"
       - name: console
         description: Attach to VM serial console log (exit with Ctrl-C)
+        run: "[mise, run, vm:console]"
       - name: ssh
         description: SSH as admin (forwards to VM via bridge or hostfwd)
+        run: "[mise, run, vm:ssh]"
       - name: ssh:wait
         description: Wait until VM SSH is reachable (polls)
+        run: "[mise, run, vm:ssh:wait]"
       - name: info
         description: Show VM status, PID, network mode, disks
+        run: "[mise, run, vm:info]"
       - name: clean
         description: Remove generated disks and seed ISO (keeps base cloud image)
+        run: "[mise, run, vm:clean]"
       - name: clean:all
         description: Remove everything including base cloud image
+        run: "[mise, run, vm:clean:all]"
 
   - name: user
     description: Sandbox user management (proxies to VM via SSH, wraps mise run user:*)
     subcommands:
       - name: add
-        description: Create a sandbox user: gleiphnir user add USER=alice [KEY=~/.ssh/id_ed25519.pub]
+        description: "Create a sandbox user: gleiphnir user add USER=alice [KEY=~/.ssh/id_ed25519.pub]"
         args:
           - name: username
             description: Username to create
@@ -68,40 +84,54 @@ commands:
             args:
               - name: pubkey
                 type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_KEY_FILE" ]; then flag_args="$flag_args KEY=$C_FLAG_KEY_FILE"; fi
+          if [ -n "$C_FLAG_KEY" ]; then flag_args="$flag_args KEY=$C_FLAG_KEY"; fi
+          # shellcheck disable=SC2086
+          exec mise run user:add -- "$@" $flag_args
       - name: remove
-        description: Remove a sandbox user: gleiphnir user remove USER=alice
+        description: "Remove a sandbox user: gleiphnir user remove USER=alice"
         args:
           - name: username
             description: Username to remove
+        run: "[mise, run, user:remove]"
       - name: list
         description: List sandbox users (proxies to VM)
+        run: "[mise, run, user:list]"
 
   - name: fw
     description: Firewall (deprecated → policy, proxies to guest ufw, wraps mise run fw:*)
     aliases: [firewall]
     subcommands:
       - name: allow
-        description: Allow an IP to SSH to the VM (deprecated — use policy allow): gleiphnir fw allow IP=1.2.3.4
+        description: "Allow an IP to SSH to the VM (deprecated — use policy allow): gleiphnir fw allow IP=1.2.3.4"
         args:
           - name: ip
             description: IP address or CIDR
+        run: "[mise, run, fw:allow]"
       - name: deny
-        description: Block an IP at the VM firewall (deprecated — use policy deny): gleiphnir fw deny IP=1.2.3.4
+        description: "Block an IP at the VM firewall (deprecated — use policy deny): gleiphnir fw deny IP=1.2.3.4"
         args:
           - name: ip
             description: IP address or CIDR
+        run: "[mise, run, fw:deny]"
       - name: remove
-        description: Remove an IP from allow/deny rules (deprecated): gleiphnir fw remove IP=1.2.3.4
+        description: "Remove an IP from allow/deny rules (deprecated): gleiphnir fw remove IP=1.2.3.4"
         aliases: [delete, unallow, undeny]
         args:
           - name: ip
             description: IP address or CIDR
+        run: "[mise, run, fw:remove]"
       - name: list
         description: List ufw rules in the VM
         aliases: [show, status]
+        run: "[mise, run, fw:list]"
       - name: enforce
         description: Lock down SSH to allow-listed IPs only (removes bootstrap open rule)
         aliases: [lockdown]
+        run: "[mise, run, fw:enforce]"
 
   - name: policy
     description: Network policy (sbx parity) — egress/ingress allow/deny, presets, per-sandbox (wraps mise run policy:*)
@@ -113,6 +143,7 @@ commands:
           - name: preset
             description: Preset name
             enum: [balanced, open, locked, allow-all, deny-all]
+        run: "[mise, run, policy:init]"
       - name: ls
         description: List active policy rules (global + per-sandbox)
         aliases: [list, show, status]
@@ -129,6 +160,14 @@ commands:
             args:
               - name: name
                 type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_WIDE" ]; then flag_args="$flag_args --wide"; fi
+          if [ -n "$C_FLAG_JSON" ]; then flag_args="$flag_args --json"; fi
+          if [ -n "$C_FLAG_SANDBOX" ]; then flag_args="$flag_args --sandbox $C_FLAG_SANDBOX"; fi
+          # shellcheck disable=SC2086
+          exec mise run policy:ls -- $flag_args "$@"
       - name: allow
         description: Allow network host/cidr/wildcard (proxy or ufw)
         args:
@@ -137,6 +176,25 @@ commands:
             enum: [network]
           - name: resource
             description: Host, wildcard (*.github.com), **, or CIDR
+        flags:
+          - name: --sandbox
+            description: Scoped sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+          - name: --port
+            description: Port filter
+            flag: --port
+            args:
+              - name: port
+                type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_SANDBOX" ]; then flag_args="$flag_args --sandbox $C_FLAG_SANDBOX"; fi
+          if [ -n "$C_FLAG_PORT" ]; then flag_args="$flag_args --port $C_FLAG_PORT"; fi
+          exec mise run policy:allow -- "$@" $flag_args
       - name: deny
         description: Deny network host/cidr
         args:
@@ -145,6 +203,23 @@ commands:
             enum: [network]
           - name: resource
             description: Host or CIDR to block
+        flags:
+          - name: --sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+          - name: --port
+            flag: --port
+            args:
+              - name: port
+                type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_SANDBOX" ]; then flag_args="$flag_args --sandbox $C_FLAG_SANDBOX"; fi
+          if [ -n "$C_FLAG_PORT" ]; then flag_args="$flag_args --port $C_FLAG_PORT"; fi
+          exec mise run policy:deny -- "$@" $flag_args
       - name: rm
         description: Remove rule by --resource or --id
         aliases: [remove, delete]
@@ -167,6 +242,13 @@ commands:
             args:
               - name: name
                 type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_RESOURCE" ]; then flag_args="$flag_args --resource $C_FLAG_RESOURCE"; fi
+          if [ -n "$C_FLAG_ID" ]; then flag_args="$flag_args --id $C_FLAG_ID"; fi
+          if [ -n "$C_FLAG_SANDBOX" ]; then flag_args="$flag_args --sandbox $C_FLAG_SANDBOX"; fi
+          exec mise run policy:rm -- "$@" $flag_args
       - name: check
         description: Test if host:port would be allowed
         args:
@@ -175,34 +257,56 @@ commands:
             enum: [network]
           - name: target
             description: Host, host:port, or URL
+        flags:
+          - name: --sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_SANDBOX" ]; then flag_args="$flag_args --sandbox $C_FLAG_SANDBOX"; fi
+          exec mise run policy:check -- "$@" $flag_args
       - name: reset
         description: Wipe local policy and re-init balanced
         flags:
           - name: --force
             description: Skip confirmation
             flag: --force
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_FORCE" ]; then flag_args="$flag_args --force"; fi
+          exec mise run policy:reset -- "$@" $flag_args
       - name: preset
         description: Manage presets (list|apply|diff)
         subcommands:
           - name: list
             description: Show available presets
+            run: "[mise, run, policy:preset, list]"
           - name: apply
             description: Apply preset (balanced|open|locked)
             args:
               - name: preset
                 enum: [balanced, open, locked]
+            run: "[mise, run, policy:preset, apply]"
           - name: diff
             description: Diff preset vs active
+            run: "[mise, run, policy:preset, diff]"
       - name: dump
         description: Dump Docker Sandbox preset if sbx present
+        run: "[mise, run, policy:dump]"
 
   - name: container
     description: Sandbox container image
     subcommands:
       - name: build
         description: Build the sandbox container image inside the running VM
+        run: "[mise, run, container:build]"
       - name: info
         description: Show container image info from inside the VM
+        run: "[mise, run, container:info]"
 
   - name: sbom
     description: Software Bill of Materials
@@ -222,6 +326,12 @@ commands:
             args:
               - name: dir
                 type: path
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_FORMAT" ]; then flag_args="$flag_args --format $C_FLAG_FORMAT"; fi
+          if [ -n "$C_FLAG_OUTPUT" ]; then flag_args="$flag_args --output $C_FLAG_OUTPUT"; fi
+          exec mise run sbom:container -- "$@" $flag_args
       - name: tools
         description: Generate SBOM for installed mise toolchains
         flags:
@@ -237,6 +347,12 @@ commands:
             args:
               - name: dir
                 type: path
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_FORMAT" ]; then flag_args="$flag_args --format $C_FLAG_FORMAT"; fi
+          if [ -n "$C_FLAG_OUTPUT" ]; then flag_args="$flag_args --output $C_FLAG_OUTPUT"; fi
+          exec mise run sbom:tools -- "$@" $flag_args
       - name: vm
         description: Generate SBOM for VM apt packages
         flags:
@@ -252,6 +368,12 @@ commands:
             args:
               - name: dir
                 type: path
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_FORMAT" ]; then flag_args="$flag_args --format $C_FLAG_FORMAT"; fi
+          if [ -n "$C_FLAG_OUTPUT" ]; then flag_args="$flag_args --output $C_FLAG_OUTPUT"; fi
+          exec mise run sbom:vm -- "$@" $flag_args
       - name: all
         description: Generate all SBOMs (container + tools + VM)
         flags:
@@ -267,28 +389,39 @@ commands:
             args:
               - name: dir
                 type: path
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_FORMAT" ]; then flag_args="$flag_args --format $C_FLAG_FORMAT"; fi
+          if [ -n "$C_FLAG_OUTPUT" ]; then flag_args="$flag_args --output $C_FLAG_OUTPUT"; fi
+          exec mise run sbom:all -- "$@" $flag_args
 
   - name: tools
     description: Volume tools (inspect / manage mise installs, wraps mise run tools:*)
     subcommands:
       - name: list
         description: List all installed mise tools (shared + personal) with disk usage
+        run: "[mise, run, tools:list]"
       - name: info
-        description: Show details for a specific tool: gleiphnir tools info TOOL=ripgrep
+        description: "Show details for a specific tool: gleiphnir tools info TOOL=ripgrep"
         args:
           - name: tool
             description: Tool name
             dynamic: true
+        run: "[mise, run, tools:info]"
       - name: clean
-        description: Remove a personal tool install: gleiphnir tools clean TOOL=ripgrep
+        description: "Remove a personal tool install: gleiphnir tools clean TOOL=ripgrep"
         args:
           - name: tool
             description: Tool name to remove
             dynamic: true
+        run: "[mise, run, tools:clean]"
       - name: clean:all
         description: Remove all personal tool installs (prompts for confirmation)
+        run: "[mise, run, tools:clean:all]"
       - name: volumes
         description: Show volume mount info and disk usage inside the VM
+        run: "[mise, run, tools:volumes]"
       - name: search
         description: Proxy-aware search over package managers + GitHub + Exa AI (exa.ai)
         args:
@@ -304,6 +437,12 @@ commands:
           - name: --json
             description: JSON output
             flag: --json
+        run: |
+          #!/bin/sh
+          flag_args=""
+          if [ -n "$C_FLAG_SOURCE" ]; then flag_args="$flag_args --source $C_FLAG_SOURCE"; fi
+          if [ -n "$C_FLAG_JSON" ]; then flag_args="$flag_args --json"; fi
+          exec mise run tools:search -- "$@" $flag_args
 
   - name: obs
     description: Observability (Grafana LGTM)
@@ -311,38 +450,53 @@ commands:
     subcommands:
       - name: start
         description: Start LGTM container on host and deploy agents to VM
+        run: "[mise, run, obs:start]"
       - name: stop
         description: Stop LGTM container on host
+        run: "[mise, run, obs:stop]"
       - name: status
         description: Show LGTM observability status
+        run: "[mise, run, obs:status]"
       - name: open
         description: Open Grafana dashboard in browser
+        run: "[mise, run, obs:open]"
       - name: deploy
         description: Deploy observability agents to running VM (after obs:start)
+        run: "[mise, run, obs:deploy]"
       - name: clean
         description: Remove LGTM container and data volume
+        run: "[mise, run, obs:clean]"
 
   - name: secrets
     description: Secrets management
     subcommands:
       - name: init
         description: Generate age keypair for secrets encryption
+        run: "[mise, run, secrets:init]"
       - name: encrypt
         description: Encrypt config/secrets.env → config/secrets.env.enc (age)
+        run: "[mise, run, secrets:encrypt]"
       - name: decrypt
         description: Decrypt config/secrets.env.enc → config/secrets.env
+        run: "[mise, run, secrets:decrypt]"
       - name: sync
         description: Sync encrypted secrets to VM and decrypt there
+        run: "[mise, run, secrets:sync]"
       - name: list
         description: List configured secret key names on the VM
+        run: "[mise, run, secrets:list]"
       - name: status
         description: Show secrets encryption and sync status
+        run: "[mise, run, secrets:status]"
 
   - name: up
     description: Full bring-up — deps check, download image, prepare, start, wait for SSH, optionally start observability
+    run: "[mise, run, up]"
 
   - name: down
     description: Stop VM, tear down bridge/TAP, stop observability
+    run: "[mise, run, down]"
 
   - name: smoke
     description: Quick smoke test (requires running VM)
+    run: "[mise, run, smoke]"

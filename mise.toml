@@ -8,6 +8,7 @@ opencode = "latest"
 powershell = "latest"
 syft = "latest"            # SBOM generation (SPDX + CycloneDX)
 "github:equinix-labs/otel-cli" = "latest"   # OTel tracing for host pwsh scripts
+carapace = "latest"
 # mise itself is the only hard host requirement (plus pwsh + qemu, checked by `mise run deps`)
 
 [settings]

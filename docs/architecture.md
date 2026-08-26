@@ -29,7 +29,7 @@ See `README.md` for user-facing docs. This file is for contributors.
   - `sandbox-sbom` — generate Software Bill of Materials for the container image, mise toolchains, and VM apt packages. Uses `syft` when available, falls back to manifest-based SBOM generation. Outputs SPDX 2.3 or CycloneDX 1.5 JSON. Subcommands: `container`, `tools`, `vm`, `all`. Exposed as `fenrir sbom` and `gleiphnir sbom`.
   - `build-container.sh` — podman build + **warm-up**: pre-installs the manifest (including `gdu` + `yazi`) into `sandbox-mise` so no user ever waits for downloads.
 
-- **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, `yazi`/`yasi` + `gdu`, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh. Binaries `/usr/local/bin/fenrir` (`fen`) and `/usr/local/bin/gleiphnir` (`gle`) are baked in (`container/Containerfile:36`).
+- **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, `yazi`/`yasi` + `gdu`, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh. Binary `/usr/local/bin/fenrir` (`fen`) is baked in (`container/Containerfile:39`); `gleiphnir` is host-only via carapace shim `~/.config/carapace/bin/gleiphnir` (`vm/files/carapace/specs/gleiphnir.yaml` `run:`).
 
 ## SBOM (Software Bill of Materials)
 
@@ -63,7 +63,7 @@ Sandbox dotfiles ship from `/etc/sandbox/dotfiles/` inside the container image:
 
 [Carapace](https://carapace.sh) provides multi-shell tab completion for all Gleiphnir commands, now **nested** under two CLIs. Host CLIs are in `vm/files/carapace/specs/` (host only), container CLIs in `container/files/carapace/specs/` (container). Deployed system-wide into the container at `/etc/carapace/specs/` (fenrir) and on host `~/.config/carapace/specs/` (gleiphnir via `vm/scripts/`).
 
-> **Specs never run tools** — they only describe `commands`/`subcommands`/`flags` for `carapace` (no `run:`). Execution is `gleiphnir` shim → `mise run` → `vm/scripts/*.ps1` → `sandbox-*` → `ufw`/proxy. See `docs/policy.md` “Specs vs Execution”.
+> **Specs are executable** — `vm/files/carapace/specs/gleiphnir.yaml` has `run:` on every leaf (`carapace --run` → `mise run`); `container/files/carapace/specs/fenrir.yaml` remains completion-only (executes via `fenrir` bash shim → `gdu`/`yazi`/`sandbox-*`). Host `gleiphnir` shim `~/.config/carapace/bin/gleiphnir` → `vm/scripts/*.ps1` → `sandbox-*` → `ufw`/proxy. Legacy `vm/files/gleiphnir` shim remains for fallback. See `docs/policy.md` “Specs vs Execution”.
 
 | Spec file | Command | Completions | Alias |
 |---|---|---|---|

@@ -150,12 +150,6 @@ __START_PWSH_CONTENT__
     content: |
 __FENRIR_CONTENT__
 
-  # gleiphnir CLI (wraps mise tasks, alias gle)
-  - path: /opt/sandbox/container/files/gleiphnir
-    permissions: '0755'
-    content: |
-__GLEIPHNIR_CONTENT__
-
   # carapace spec for fenrir (fen) — gleiphnir spec is host-only (vm/files/...), not in container
   - path: /opt/sandbox/container/files/carapace/specs/fenrir.yaml
     permissions: '0644'
