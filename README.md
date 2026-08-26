@@ -141,6 +141,7 @@ In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP r
 - **Per-user home volume** (`gleiphnir-home-<user>`): `~/.cache`, `~/.local` (atuin history!), `~/.config` persist across restarts.
 - **Dotfiles via mise**: bashrc / pwsh profile / gitconfig ship at `/etc/sandbox/dotfiles` and are linked by the `dotfiles` mise task on each start. Personal overrides: put same-named files in `/work/dotfiles/`.
 - **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi file manager, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
+- **Shell completion**: Carapace provides tab completion for all `sandbox-*` commands (with `gle-*` aliases) and enhanced mise task completions. Specs ship in the container image at `/etc/carapace/specs/`.
 
 ## Sandbox users & workspaces
 
@@ -209,6 +210,7 @@ container/
   files/mise.toml                   manifest (tools + env defaults + dotfiles task)
   files/dotfiles/                   bashrc, profile.ps1, gitconfig
   files/start-pwsh.sh               stable pwsh launcher (bash → exec pwsh)
+  files/carapace/specs/             Carapace completion specs (sandbox-* + mise)
 docs/architecture.md                contributor deep-dive
 ```
 

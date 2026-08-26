@@ -1,0 +1,26 @@
+name: sandbox-firewall
+description: manage VM firewall (ufw) IP allow/deny lists
+aliases: [gle-firewall]
+commands:
+  - name: allow
+    description: Allow an IP to reach SSH (tcp/22)
+    args:
+      - name: ip
+        description: IP address or CIDR (e.g. 203.0.113.42 or 198.51.100.0/24)
+  - name: deny
+    description: Block ALL traffic from an IP/net
+    args:
+      - name: ip
+        description: IP address or CIDR to block
+  - name: remove
+    description: Remove matching allow and deny rules
+    aliases: [delete, unallow, undeny]
+    args:
+      - name: ip
+        description: IP address or CIDR to remove
+  - name: enforce
+    description: Lock down SSH — drop bootstrap "any to :22" rule
+    aliases: [lockdown]
+  - name: list
+    description: Show ufw status and numbered rules
+    aliases: [show, status]

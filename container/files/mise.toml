@@ -72,6 +72,15 @@ if command -v git >/dev/null 2>&1; then
   git config --global core.excludesfile ~/.gitignore_global 2>/dev/null || true
 fi
 
+# Install Carapace completions (Gleiphnir custom specs + mise task specs)
+if command -v carapace >/dev/null 2>&1; then
+  mkdir -p "$HOME/.config/carapace/specs"
+  for spec in /etc/carapace/specs/*.yaml; do
+    [ -f "$spec" ] || continue
+    ln -sfn "$spec" "$HOME/.config/carapace/specs/$(basename "$spec")"
+  done
+fi
+
 echo "[sandbox] dotfiles linked."
 '''
 

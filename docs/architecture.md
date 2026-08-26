@@ -57,6 +57,23 @@ Sandbox dotfiles ship from `/etc/sandbox/dotfiles/` inside the container image:
 
 **Personalization**: run `mise run dotfiles:init` to scaffold `/work/dotfiles/` with editable copies. Files there override the defaults. The `dotfiles` task re-links on every container start.
 
+## Shell completion (Carapace)
+
+[Carapace](https://carapace.sh) provides multi-shell tab completion for all Gleiphnir commands. Custom spec files live in `container/files/carapace/specs/` and are deployed system-wide into the container at `/etc/carapace/specs/`.
+
+| Spec file | Command | Completions |
+|---|---|---|
+| `sandbox-user.yaml` | `sandbox-user` | `add`/`remove`/`list`, `--key-file`/`--key` flags |
+| `sandbox-firewall.yaml` | `sandbox-firewall` | `allow`/`deny`/`remove`/`enforce`/`list` with aliases |
+| `sandbox-tools.yaml` | `sandbox-tools` | `list`/`info`/`clean`/`clean:all`/`volumes`, dynamic tool names |
+| `sandbox-sbom.yaml` | `sandbox-sbom` | `container`/`tools`/`vm`/`all`, `--format`/`--output` flags |
+| `sandbox-journal.yaml` | `sandbox-journal` | All `--flags` with typed values |
+| `sandbox-secrets.yaml` | `sandbox-secrets` | `list`/`set`/`remove`/`export`/`rotate`, dynamic key names |
+| `sandbox-proxy.yaml` | `sandbox-proxy` | `--listen-port`/`--log-dir`/`--otel-endpoint` flags |
+| `mise.yaml` | `mise` | Enhanced task completion with descriptions |
+
+Each spec declares `aliases: [gle-*]` so users can also type `gle-user`, `gle-tools`, etc. as shorthand. Specs are loaded via `CARAPACE_SPEC_DIR=/etc/carapace/specs` (set in bashrc and pwsh profile) and additionally symlinked into `~/.config/carapace/specs/` by the `dotfiles` task.
+
 ## Volume tooling
 
 `sandbox-tools` (inside containers) and `mise run tools:*` (host-side) provide visibility into mise tool installs:

@@ -36,6 +36,7 @@ RUN useradd -m -s /usr/local/bin/sandbox-pwsh -u 1000 dev \
 # Default mise manifest and dotfiles (also shipped as /etc/sandbox/* inside VM build script)
 COPY files/mise.toml /etc/sandbox/mise.toml
 COPY files/dotfiles/ /etc/sandbox/dotfiles/
+COPY files/carapace/ /etc/carapace/
 COPY files/start-pwsh.sh /usr/local/bin/sandbox-pwsh
 COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
 RUN chmod +x /usr/local/bin/sandbox-pwsh /usr/local/bin/sandbox-entrypoint.sh

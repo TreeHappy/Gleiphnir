@@ -1,0 +1,82 @@
+name: mise
+description: dev tools, config files, and task runner
+commands:
+  - name: run
+    description: Run a task
+    args:
+      - name: task
+        description: Task to run
+        completion: _mise_tasks
+        dynamic: true
+  - name: tasks
+    description: Manage tasks
+    subcommands:
+      - name: ls
+        description: List available tasks
+      - name: run
+        description: Run a task
+      - name: set
+        description: Set a task
+  - name: use
+    description: Install a tool version
+    args:
+      - name: tool
+        description: "tool@version (e.g. node@lts)"
+  - name: install
+    description: Install tool versions from mise.toml
+    flags:
+      - name: --yes
+        description: Skip confirmation prompt
+        flag: --yes
+  - name: ls
+    description: List installed tool versions
+  - name: ls-remote
+    description: List available remote versions for a tool
+    args:
+      - name: tool
+        description: Tool name to query
+  - name: current
+    description: Show current active tool versions
+  - name: where
+    description: Show install path for a tool
+    args:
+      - name: tool
+        description: Tool name
+  - name: which
+    description: Show path to a tool binary
+    args:
+      - name: command
+        description: Command name
+  - name: reshim
+    description: Regenerate shims for installed tools
+  - name: trust
+    description: Trust a mise.toml file
+    flags:
+      - name: --all
+        description: Trust all configs
+        flag: --all
+  - name: settings
+    description: Manage mise settings
+  - name: activate
+    description: Activate mise for the current shell
+    args:
+      - name: shell
+        description: Shell to activate for
+        enum: [bash, zsh, fish, pwsh]
+  - name: completion
+    description: Generate shell completions
+    args:
+      - name: shell
+        description: Shell to generate for
+        enum: [bash, zsh, fish, pwsh]
+  - name: outdated
+    description: Show outdated tool versions
+  - name: upgrade
+    description: Upgrade outdated tool versions
+  - name: uninstall
+    description: Uninstall a tool version
+    args:
+      - name: tool
+        description: Tool to uninstall
+  - name: self-update
+    description: Update mise itself

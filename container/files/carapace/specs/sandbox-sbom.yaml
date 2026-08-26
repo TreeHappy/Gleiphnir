@@ -1,0 +1,64 @@
+name: sandbox-sbom
+description: generate Software Bill of Materials for Gleiphnir
+aliases: [gle-sbom]
+commands:
+  - name: container
+    description: SBOM for the sandbox container image
+    flags:
+      - name: --format
+        description: Output format
+        flag: --format
+        args:
+          - name: format
+            enum: [spdx-json, cyclonedx]
+      - name: --output
+        description: Output directory
+        flag: --output
+        args:
+          - name: dir
+            type: path
+  - name: tools
+    description: SBOM for installed mise toolchains
+    flags:
+      - name: --format
+        description: Output format
+        flag: --format
+        args:
+          - name: format
+            enum: [spdx-json, cyclonedx]
+      - name: --output
+        description: Output directory
+        flag: --output
+        args:
+          - name: dir
+            type: path
+  - name: vm
+    description: SBOM for VM apt packages
+    flags:
+      - name: --format
+        description: Output format
+        flag: --format
+        args:
+          - name: format
+            enum: [spdx-json, cyclonedx]
+      - name: --output
+        description: Output directory
+        flag: --output
+        args:
+          - name: dir
+            type: path
+  - name: all
+    description: Generate all SBOMs (container + tools + VM)
+    flags:
+      - name: --format
+        description: Output format
+        flag: --format
+        args:
+          - name: format
+            enum: [spdx-json, cyclonedx]
+      - name: --output
+        description: Output directory
+        flag: --output
+        args:
+          - name: dir
+            type: path

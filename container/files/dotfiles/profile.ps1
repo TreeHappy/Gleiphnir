@@ -24,8 +24,9 @@ if (Get-Command atuin -ErrorAction SilentlyContinue) {
     try { Invoke-Expression (@(atuin init powershell --disable-up-arrow | Out-String)) } catch { }
 }
 
-# ── carapace: completions ──────────────────────────────────────────────────
+# ── carapace: completions (with Gleiphnir custom specs) ────────────────────
 if (Get-Command carapace -ErrorAction SilentlyContinue) {
+    $env:CARAPACE_SPEC_DIR = "/etc/carapace/specs"
     try { carapace _carapace | Out-String | Invoke-Expression } catch { }
 }
 

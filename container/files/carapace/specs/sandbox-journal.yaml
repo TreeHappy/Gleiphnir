@@ -1,0 +1,49 @@
+name: sandbox-journal
+description: query the agent audit journal
+aliases: [gle-journal]
+flags:
+  - name: --last
+    description: Show last N commands (default: 20)
+    flag: --last
+    args:
+      - name: n
+        type: number
+  - name: --user
+    description: Filter by user
+    flag: --user
+    args:
+      - name: user
+        type: string
+  - name: --session
+    description: Filter by session ID
+    flag: --session
+    args:
+      - name: id
+        type: string
+  - name: --grep
+    description: Search commands (regex)
+    flag: --grep
+    args:
+      - name: pattern
+        type: string
+  - name: --since
+    description: Filter by time duration
+    flag: --since
+    args:
+      - name: duration
+        enum: ["30s", "5m", "1h", "7d"]
+  - name: --failed
+    description: Only failed commands (exit_code != 0)
+    flag: --failed
+  - name: --cwd
+    description: Filter by working directory prefix
+    flag: --cwd
+    args:
+      - name: path
+        type: path
+  - name: --json
+    description: Output raw JSON (one object per line)
+    flag: --json
+  - name: --follow
+    description: Tail new entries (like tail -f)
+    flag: --follow

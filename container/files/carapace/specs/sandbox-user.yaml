@@ -1,0 +1,29 @@
+name: sandbox-user
+description: manage sandbox users on the VM
+aliases: [gle-user]
+commands:
+  - name: add
+    description: Create a sandbox user with SSH key access
+    args:
+      - name: username
+        description: Username to create (^[a-z_][a-z0-9_-]{0,31}$)
+    flags:
+      - name: --key-file
+        description: Path to SSH public key file
+        flag: --key-file
+        args:
+          - name: path
+            type: path
+      - name: --key
+        description: SSH public key literal string
+        flag: --key
+        args:
+          - name: pubkey
+            type: string
+  - name: remove
+    description: Remove a sandbox user and clean up resources
+    args:
+      - name: username
+        description: Username to remove
+  - name: list
+    description: List all sandbox users with home and workspace paths

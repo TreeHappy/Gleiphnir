@@ -19,8 +19,9 @@ if command -v atuin >/dev/null 2>&1; then
   eval "$(atuin init bash)" 2>/dev/null || true
 fi
 
-# carapace — completions
+# carapace — completions (with Gleiphnir custom specs)
 if command -v carapace >/dev/null 2>&1; then
+  export CARAPACE_SPEC_DIR="/etc/carapace/specs"
   source <(carapace _carapace) 2>/dev/null || true
 fi
 
