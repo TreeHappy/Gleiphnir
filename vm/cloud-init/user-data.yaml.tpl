@@ -56,11 +56,33 @@ __SANDBOX_SHELL_CONTENT__
     content: |
 __SANDBOX_USER_CONTENT__
 
-  # sandbox-firewall
+  # sandbox-firewall (with ingress/egress)
   - path: /usr/local/bin/sandbox-firewall
     permissions: '0755'
     content: |
 __SANDBOX_FIREWALL_CONTENT__
+
+  # sandbox-policy (sbx parity: presets + domain/IP allow/deny, via proxy + ufw)
+  - path: /usr/local/bin/sandbox-policy
+    permissions: '0755'
+    content: |
+__SANDBOX_POLICY_CONTENT__
+
+  # policy presets (balanced/open/locked)
+  - path: /etc/sandbox/policy-presets/balanced.txt
+    permissions: '0644'
+    content: |
+__POLICY_BALANCED_CONTENT__
+
+  - path: /etc/sandbox/policy-presets/open.txt
+    permissions: '0644'
+    content: |
+__POLICY_OPEN_CONTENT__
+
+  - path: /etc/sandbox/policy-presets/locked.txt
+    permissions: '0644'
+    content: |
+__POLICY_LOCKED_CONTENT__
 
   # build-container helper
   - path: /usr/local/lib/sandbox/build-container.sh
@@ -133,16 +155,11 @@ __FENRIR_CONTENT__
     content: |
 __GLEIPHNIR_CONTENT__
 
-  # carapace specs for fenrir (fen) and gleiphnir (gle)
+  # carapace spec for fenrir (fen) — gleiphnir spec is host-only (vm/files/...), not in container
   - path: /opt/sandbox/container/files/carapace/specs/fenrir.yaml
     permissions: '0644'
     content: |
 __FENRIR_SPEC_CONTENT__
-
-  - path: /opt/sandbox/container/files/carapace/specs/gleiphnir.yaml
-    permissions: '0644'
-    content: |
-__GLEIPHNIR_SPEC_CONTENT__
 
   # ── observability: session logger, HTTP proxy, OTel config ─────────────
   # session-logger (PTY wrapper for keystroke capture)
@@ -237,6 +254,9 @@ runcmd:
   - mkdir -p /var/lib/sandbox
   - mkdir -p /var/log/sandbox
   - chmod 1777 /var/log/sandbox
+  - mkdir -p /etc/sandbox/policy-presets
+  - chmod 755 /etc/sandbox/policy-presets
+  - echo "Initializing balanced policy preset..." && (sudo /usr/local/bin/sandbox-policy init balanced 2>&1 | tail -5 || true)
   # Ensure subuid/subgid exist for admin (needed for rootless podman even for admin itself)
   - grep -q "^__ADMIN_USER__:" /etc/subuid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subuid
   - grep -q "^__ADMIN_USER__:" /etc/subgid 2>/dev/null || echo "__ADMIN_USER__:100000:165536" >> /etc/subgid

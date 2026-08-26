@@ -20,10 +20,11 @@ Usage:
   gleiphnir network up|down|status        Bridge/TAP networking (Linux)
   gleiphnir vm prepare|start|stop|kill|console|ssh|ssh:wait|info|clean|clean:all
   gleiphnir user add|remove|list [USER=...] [KEY=...]
-  gleiphnir fw allow|deny|remove|list|enforce [IP=...]
+  gleiphnir fw allow|deny|remove|list|enforce [IP=...]     (deprecated: use policy)
+  gleiphnir policy init|ls|allow|deny|rm|check|reset|preset   Network policy (sbx parity)
   gleiphnir container build|info          Container image
   gleiphnir sbom container|tools|vm|all   SBOM generation
-  gleiphnir tools list|info|clean|clean:all|volumes
+  gleiphnir tools list|info|clean|clean:all|volumes|search  Tools + proxy-aware search (npm/pypi/github/exa)
   gleiphnir obs start|stop|status|open|deploy|clean  Observability (LGTM)
   gleiphnir secrets init|encrypt|decrypt|sync|list|status
   gleiphnir smoke                         Smoke test
@@ -36,7 +37,11 @@ Mapping examples:
   gleiphnir user add USER=alice   → mise run user:add USER=alice
   gleiphnir user add alice --key-file ~/.ssh/id_ed25519.pub
   gleiphnir fw allow 203.0.113.42  → mise run fw:allow IP=203.0.113.42
+  gleiphnir policy init balanced  → mise run policy:init
+  gleiphnir policy allow network api.exa.ai --sandbox alice → mise run policy:allow
+  gleiphnir policy check network api.github.com:443
   gleiphnir tools info TOOL=ripgrep
+  gleiphnir tools search "http client" --source npm
   gleiphnir sbom container --format cyclonedx
 
 Aliases:
@@ -219,8 +224,25 @@ case "$CMD" in
       clean)     run_mise "tools:clean" "$@" ;;
       clean:all) run_mise "tools:clean:all" "$@" ;;
       volumes)   run_mise "tools:volumes" "$@" ;;
-      ""|-h|--help) echo "Usage: gleiphnir tools list|info|clean|clean:all|volumes"; exit 0 ;;
+      search)    run_mise "tools:search" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir tools list|info|clean|clean:all|volumes|search"; exit 0 ;;
       *) die "unknown gleiphnir tools subcommand: $SUB" ;;
+    esac
+    ;;
+  policy)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      init)    run_mise "policy:init" "$@" ;;
+      ls|list|show|status) run_mise "policy:ls" "$@" ;;
+      allow)   run_mise "policy:allow" "$@" ;;
+      deny)    run_mise "policy:deny" "$@" ;;
+      rm|remove|delete) run_mise "policy:rm" "$@" ;;
+      check)   run_mise "policy:check" "$@" ;;
+      reset)   run_mise "policy:reset" "$@" ;;
+      preset)  run_mise "policy:preset" "$@" ;;
+      dump)    run_mise "policy:dump" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir policy init|ls|allow|deny|rm|check|reset|preset [args]"; exit 0 ;;
+      *) die "unknown gleiphnir policy subcommand: $SUB" ;;
     esac
     ;;
   obs)

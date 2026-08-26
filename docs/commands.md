@@ -7,15 +7,15 @@
 > - **Gleiphnir** (`gle`) — **host/VM** orchestration CLI. Every leaf **calls `mise run <task>`**
 >   (`mise.toml:1`), via nested `subcommands` (e.g. `gleiphnir vm start` → `mise run vm:start`).
 
-Specs live at:
+Specs live at (gleiphnir is **host-only**, `vm/scripts/`):
 
 | CLI | Spec file | Deployed to | Alias |
 |---|---|---|---|
 | `fenrir` | `container/files/carapace/specs/fenrir.yaml` | `/etc/carapace/specs/fenrir.yaml` → `~/.config/carapace/specs/` via `container/files/mise.toml:77` `dotfiles` task | `fen` |
-| `gleiphnir` | `container/files/carapace/specs/gleiphnir.yaml` + `vm/files/carapace/specs/gleiphnir.yaml` (mirror) | `/etc/carapace/specs/gleiphnir.yaml` + `/opt/sandbox/container/files/carapace/specs/` (cloud-init) + host `~/.config/carapace/specs/` (manual `ln -s`) | `gle` |
+| `gleiphnir` | `vm/files/carapace/specs/gleiphnir.yaml` **(host only)** | host `~/.config/carapace/specs/` (manual `ln -s`) + VM `/usr/local/bin/gleiphnir` (cloud-init) | `gle` |
 | `mise` | `container/files/carapace/specs/mise.yaml` | enhanced task completion | — |
 
-Shells load via `container/files/dotfiles/bashrc:23` and `container/files/dotfiles/profile.ps1:30` (`CARAPACE_SPEC_DIR=/etc/carapace/specs` + `carapace _carapace`).
+> **Specs never run tools** — they only describe nested `commands`/`subcommands`/`flags` for `carapace` tab-completion (no `run:` field). Execution is `gleiphnir` shim (`vm/files/gleiphnir:50` `run_mise`) → `mise run <task>` → `vm/scripts/*.ps1` → `ssh admin@VM "sudo sandbox-*"` → `ufw`/`proxy` (`vm/guest/bin/sandbox-policy` etc.). Container shells load via `container/files/dotfiles/bashrc:23` and `profile.ps1:30` (`CARAPACE_SPEC_DIR=/etc/carapace/specs` + `carapace _carapace`); host needs manual link (see below).
 
 ---
 
@@ -82,15 +82,41 @@ Flags: `--listen-port <port>` `--log-dir <dir>` `--otel-endpoint <url>`
 fenrir proxy --listen-port 8080 --log-dir /var/log/sandbox
 ```
 
-### `fenrir firewall`
+### `fenrir firewall` (deprecated → `fenrir policy`)
 
 | Subcommand | Alias | Description |
 |---|---|---|
-| `fenrir firewall allow <ip>` | — | Allow IP/CIDR → `tcp/22` |
+| `fenrir firewall allow <ip>` | — | Allow IP/CIDR → `tcp/22` (compat) |
 | `fenrir firewall deny <ip>` | — | Deny IP |
 | `fenrir firewall remove <ip>` | `delete, unallow, undeny` | Remove rules |
 | `fenrir firewall enforce` | `lockdown` | Drop bootstrap `any→:22` |
 | `fenrir firewall list` | `show, status` | `ufw status numbered` |
+| `fenrir firewall ingress allow <ip> [--port PORT] [--proto tcp\|udp]` | — | Ingress port-aware (ufw) |
+| `fenrir firewall egress allow <dst> [--port PORT] [--proto tcp\|udp]` | — | Egress port-aware (ufw) |
+
+### `fenrir policy` — egress/ingress allowlists (sbx parity)
+
+| Subcommand | Description | Flags |
+|---|---|---|
+| `fenrir policy init [balanced\|open\|locked]` | Init preset (prompts if tty) | — |
+| `fenrir policy ls` | List rules (`--wide`, `--json`, `--sandbox`) | `--wide`, `--json`, `--sandbox NAME` |
+| `fenrir policy allow network <host\|**\|CIDR>` | Allow host/wildcard/CIDR (proxy or ufw) | `--port`, `--sandbox` |
+| `fenrir policy deny network <host\|CIDR>` | Deny host/CIDR (deny wins) | `--port`, `--sandbox` |
+| `fenrir policy rm network --resource <host>` | Remove rule | `--resource`, `--id`, `--sandbox` |
+| `fenrir policy check network <host\|url>` | Test allowed | `--sandbox` |
+| `fenrir policy reset` | Wipe + re-init balanced | `--force` |
+| `fenrir policy preset list\|apply\|diff` | Presets | — |
+
+See `docs/policy.md` (global one-short) + `docs/policy/*.md` breakouts.
+
+### `fenrir tools search` (proxy-aware)
+
+Flags: `--source npm|pypi|crates|go|github|exa|auto` `--json`
+
+```bash
+fenrir tools search "http client" --source npm
+fen tools search "vector db" --source exa
+```
 
 ---
 
@@ -137,26 +163,43 @@ Binaries: `container/files/gleiphnir:1` + `vm/files/gleiphnir:1` (bash) and `vm/
 | `clean` | `vm:clean` | keep base image |
 | `clean:all` | `vm:clean:all` | all |
 
-### `gleiphnir user` / `gleiphnir fw`
+### `gleiphnir user` / `gleiphnir fw` (fw deprecated → `policy`) / `gleiphnir policy` / `gleiphnir tools search`
 
 | Gleiphnir | → `mise` | Args |
 |---|---|---|
 | `gleiphnir user add <user> [--key-file|--key]` | `user:add` | `USER=`, `KEY=` |
 | `gleiphnir user remove <user>` | `user:remove` |  |
 | `gleiphnir user list` | `user:list` |  |
-| `gleiphnir fw allow <ip>` | `fw:allow` | `IP=` |
-| `gleiphnir fw deny <ip>` | `fw:deny` |  |
-| `gleiphnir fw remove <ip>` | `fw:remove` |  |
-| `gleiphnir fw list` | `fw:list` |  |
-| `gleiphnir fw enforce` | `fw:enforce` |  |
+| `gleiphnir fw allow <ip>` | `fw:allow` | `IP=` (deprecated) |
+| `gleiphnir fw deny <ip>` | `fw:deny` | (deprecated) |
+| `gleiphnir fw remove <ip>` | `fw:remove` | (deprecated) |
+| `gleiphnir fw list` | `fw:list` | (deprecated) |
+| `gleiphnir fw enforce` | `fw:enforce` | (deprecated) |
+| `gleiphnir policy init [balanced\|open\|locked]` | `policy:init` | preset |
+| `gleiphnir policy ls [--wide] [--sandbox NAME]` | `policy:ls` | `--wide`, `--json`, `--sandbox` |
+| `gleiphnir policy allow network <host\|**\|CIDR>` | `policy:allow` | `--port`, `--sandbox` |
+| `gleiphnir policy deny network <host>` | `policy:deny` | `--port`, `--sandbox` |
+| `gleiphnir policy rm network --resource <host>` | `policy:rm` | `--resource`, `--id`, `--sandbox` |
+| `gleiphnir policy check network <host\|url>` | `policy:check` | `--sandbox` |
+| `gleiphnir policy reset [--force]` | `policy:reset` | `--force` |
+| `gleiphnir policy preset list\|apply` | `policy:preset` | — |
+| `gleiphnir tools search QUERY --source` | `tools:search` | `QUERY`, `--source npm\|pypi\|github\|exa\|auto` |
 
 ```bash
 gleiphnir user add USER=alice KEY=~/.ssh/id_ed25519.pub
 gle user add alice --key-file ~/.ssh/id_ed25519.pub
-gleiphnir fw allow 203.0.113.42
+gleiphnir fw allow 203.0.113.42        # compat → policy
 gle fw allow IP=203.0.113.42
 gle fw enforce && gle fw list
+gleiphnir policy init balanced        # like sbx policy init balanced
+gle policy ls --wide
+gle policy allow network registry.npmjs.org
+gle policy allow network api.exa.ai --sandbox alice  # per-sandbox (exa.ai = websearch)
+gle policy check network https://api.exa.ai/search
+gle tools search "http client" --source npm
 ```
+
+See `docs/policy.md` (one-short global) + `docs/policy/*.md` breakout; `docs/tools-search.md`.
 
 ### `gleiphnir container`
 
@@ -178,6 +221,7 @@ gle fw enforce && gle fw list
 | `tools clean <tool>` | `tools:clean TOOL=` |
 | `tools clean:all` | `tools:clean:all` |
 | `tools volumes` | `tools:volumes` |
+| `tools search QUERY` | `tools:search QUERY` (exa.ai, github, pypi, npm…) |
 
 ### `gleiphnir obs` / `gleiphnir secrets`
 
@@ -210,17 +254,16 @@ fen --help
 gle --help  # alias inside container
 ```
 
-### On host (manual one-time)
+### On host (manual one-time) — gleiphnir is host-only
 
 ```bash
 # Install carapace (via mise)
 mise use carapace@latest
 
-# Link specs
+# Link specs — fenrir is container, gleiphnir is host (vm/scripts)
 mkdir -p ~/.config/carapace/specs
 ln -sfn "$PWD/container/files/carapace/specs/fenrir.yaml" ~/.config/carapace/specs/fenrir.yaml
 ln -sfn "$PWD/vm/files/carapace/specs/gleiphnir.yaml" ~/.config/carapace/specs/gleiphnir.yaml
-ln -sfn "$PWD/container/files/carapace/specs/gleiphnir.yaml" ~/.config/carapace/specs/gleiphnir.yaml
 ln -sfn "$PWD/container/files/carapace/specs/mise.yaml" ~/.config/carapace/specs/mise.yaml
 
 # Shell init (bash)
@@ -253,13 +296,16 @@ gle vm start           # short alias
 | `sandbox-tools list` | `fenrir tools list` / `fen tools list` |
 | `sandbox-tools volumes` | `fenrir tools volumes` (→ `gdu`) |
 | `sandbox-user add …` | `fenrir user add …` (in-container) or `gleiphnir user add …` (host) |
-| `sandbox-firewall allow …` | `fenrir firewall allow …` or `gleiphnir fw allow …` |
+| `sandbox-firewall allow …` | `fenrir firewall allow …` or `gleiphnir fw allow …` (deprecated → `policy allow network`) |
 | `sandbox-journal --grep …` | `fenrir journal --grep …` |
 | `sandbox-sbom all` | `fenrir sbom all` or `gleiphnir sbom all` |
 | `sandbox-secrets list` | `fenrir secrets list` |
 | `sandbox-proxy` | `fenrir proxy` |
+| `sandbox-policy allow …` | `fenrir policy allow …` or `gleiphnir policy allow …` |
 | `mise run user:add …` | `gleiphnir user add …` (same underlying task) |
-| `mise run fw:allow …` | `gleiphnir fw allow …` |
+| `mise run fw:allow …` | `gleiphnir fw allow …` (deprecated → `policy`) |
+| `mise run policy:allow …` | `gleiphnir policy allow …` |
+| `sandbox-tools search …` | `fenrir tools search …` or `gleiphnir tools search …` (exa.ai, github) |
 
 Old `sandbox-*` binaries remain on VM at `/usr/local/bin/sandbox-*` for compatibility but are no longer completed via Carapace; use `fen`/`gle` going forward.
 

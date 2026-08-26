@@ -11,7 +11,7 @@ USER_INSTALLS="${USER_DATA_DIR}/installs"
 
 usage() {
   cat <<'USAGE'
-sandbox-tools — inspect and manage mise tool installs
+sandbox-tools — inspect and manage mise tool installs + proxy-aware search
 
 Usage:
   sandbox-tools list                  List all installed tools (shared + personal)
@@ -19,12 +19,16 @@ Usage:
   sandbox-tools clean TOOL            Remove a personal tool install (cannot remove shared tools)
   sandbox-tools clean:all             Remove all personal tool installs
   sandbox-tools volumes               Show volume mount and disk usage info
+  sandbox-tools search QUERY [--source npm|pypi|crates|go|github|exa] [--json]
+                                     Proxy-aware search over package managers + GitHub + Exa AI
   sandbox-tools --help                Show this help
 
 Notes:
   - Shared tools (in /opt/mise-shared) cannot be removed by users.
   - Only personal installs (~/.local/share/mise) can be deleted.
   - Use `mise use <tool>@<version>` to install a personal copy of a tool.
+  - search respects egress policy (via sandbox-policy / proxy-allowlist). Blocked
+    registries show hint: gle policy allow network <registry>.
 USAGE
 }
 
@@ -245,20 +249,106 @@ cmd_volumes() {
   fi
 }
 
+# ── search (proxy-aware) ───────────────────────────────────────────────
+cmd_search() {
+  local query="$1"; [ -n "$query" ] || die "search requires QUERY"
+  shift || true
+  local source="auto" json=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --source) source="$2"; shift 2 ;;
+      --json) json=1; shift ;;
+      *) shift ;;
+    esac
+  done
+  echo "=== Proxy-aware search: $query (source: $source) ==="
+  # check policy for each registry via sandbox-policy check (best-effort, ignore failures)
+  check_allow() {
+    local host="$1"
+    if command -v sandbox-policy >/dev/null 2>&1; then
+      if sandbox-policy check network "$host" >/dev/null 2>&1; then echo "  $host: allowed"
+      else echo "  $host: BLOCKED (gle policy allow network $host)"; fi
+    fi
+  }
+  echo "-- policy check --"
+  check_allow "registry.npmjs.org"
+  check_allow "pypi.org"
+  check_allow "crates.io"
+  check_allow "proxy.golang.org"
+  check_allow "api.github.com"
+  check_allow "api.exa.ai"
+  echo ""
+
+  # 1) mise registry search (local, always allowed)
+  echo "-- mise registry --"
+  if command -v mise >/dev/null 2>&1; then
+    mise registry 2>/dev/null | grep -i "$query" | head -20 || echo "  (no mise registry match)"
+  fi
+  echo ""
+
+  # 2) npm (if allowed)
+  if [ "$source" = "auto" ] || [ "$source" = "npm" ]; then
+    echo "-- npm (registry.npmjs.org) --"
+    if command -v npm >/dev/null 2>&1; then
+      if sandbox-policy check network registry.npmjs.org >/dev/null 2>&1; then
+        npm search "$query" --json 2>/dev/null | head -100 || npm view "$query" 2>/dev/null | head -40 || echo "  (npm query failed or offline)"
+      else
+        echo "  blocked by policy"
+      fi
+    else echo "  npm not installed"; fi
+    echo ""
+  fi
+
+  # 3) pypi
+  if [ "$source" = "auto" ] || [ "$source" = "pypi" ]; then
+    echo "-- pypi (pypi.org) --"
+    if sandbox-policy check network pypi.org >/dev/null 2>&1; then
+      curl -fsSL "https://pypi.org/pypi/${query}/json" 2>/dev/null | jq -r '.info | "\(.name) \(.version) - \(.summary)"' 2>/dev/null | head -20 || echo "  (pypi direct miss, try search via exa/github)"
+    else echo "  blocked by policy"; fi
+    echo ""
+  fi
+
+  # 4) GitHub (gh)
+  if [ "$source" = "auto" ] || [ "$source" = "github" ]; then
+    echo "-- github (api.github.com) --"
+    if sandbox-policy check network api.github.com >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
+      gh search repos "$query" --limit 5 2>/dev/null | head -40 || echo "  (gh search failed, need auth or policy)"
+    elif ! sandbox-policy check network api.github.com >/dev/null 2>&1; then echo "  blocked by policy"
+    else echo "  gh not installed"; fi
+    echo ""
+  fi
+
+  # 5) Exa AI
+  if [ "$source" = "auto" ] || [ "$source" = "exa" ]; then
+    echo "-- exa.ai (api.exa.ai) --"
+    if sandbox-policy check network api.exa.ai >/dev/null 2>&1; then
+      if [ -n "${EXA_API_KEY:-}" ]; then
+        curl -fsSL -H "x-api-key: $EXA_API_KEY" -H "Content-Type: application/json" -d "{\"query\":\"$query\",\"numResults\":5}" https://api.exa.ai/search 2>/dev/null | jq -r '.results[] | "\(.title) - \(.url)"' 2>/dev/null | head -20 || echo "  (exa search failed)"
+      else
+        echo "  EXA_API_KEY not set — sync via gle secrets set EXA_API_KEY=..."
+      fi
+    else echo "  blocked by policy (gle policy allow network api.exa.ai)"; fi
+    echo ""
+  fi
+
+  echo "Done. Use 'gle policy allow network <host>' to unblock a registry, or try --source filter."
+}
+
 # ── main ─────────────────────────────────────────────────────────────────
 SUBCMD=""
 TOOL_NAME=""
+EXTRA_ARGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    list|info|clean|volumes) SUBCMD="$1"; shift ;;
+    list|info|clean|volumes|search) SUBCMD="$1"; shift ;;
     clean:all) SUBCMD="clean:all"; shift ;;
     -h|--help|help|"") usage; exit 0 ;;
     *)
       if [ -z "$TOOL_NAME" ]; then
         TOOL_NAME="$1"; shift
       else
-        die "unexpected argument: $1"
+        EXTRA_ARGS="$EXTRA_ARGS $1"; shift
       fi
       ;;
   esac
@@ -272,4 +362,5 @@ case "$SUBCMD" in
   clean)    cmd_clean "$TOOL_NAME" ;;
   clean:all) cmd_clean_all ;;
   volumes)  cmd_volumes ;;
+  search)   cmd_search "$TOOL_NAME" $EXTRA_ARGS ;;
 esac

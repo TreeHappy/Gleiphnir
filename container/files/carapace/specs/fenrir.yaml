@@ -3,7 +3,7 @@ description: Fenrir sandbox CLI — in-container tools (delegates to gdu for vol
 aliases: [fen]
 commands:
   - name: tools
-    description: inspect and manage mise tool installs (via gdu, yazi)
+    description: inspect and manage mise tool installs (via gdu, yazi) + proxy-aware search
     subcommands:
       - name: list
         description: List all installed tools (shared + personal) with disk usage
@@ -36,6 +36,21 @@ commands:
           - name: path
             description: Path to browse
             type: path
+      - name: search
+        description: Proxy-aware search over package managers + GitHub + Exa AI (exa.ai)
+        args:
+          - name: query
+            description: Search query
+        flags:
+          - name: --source
+            description: Source filter
+            flag: --source
+            args:
+              - name: src
+                enum: [npm, pypi, crates, go, github, exa, auto]
+          - name: --json
+            description: JSON output
+            flag: --json
 
   - name: user
     description: manage sandbox users on the VM
@@ -227,10 +242,10 @@ commands:
             type: string
 
   - name: firewall
-    description: manage VM firewall (ufw) IP allow/deny lists
+    description: manage VM firewall (ufw) IP allow/deny lists (deprecated → policy)
     subcommands:
       - name: allow
-        description: Allow an IP to reach SSH (tcp/22)
+        description: Allow an IP to reach SSH (tcp/22) — deprecated, use policy allow network
         args:
           - name: ip
             description: IP address or CIDR (e.g. 203.0.113.42 or 198.51.100.0/24)
@@ -251,6 +266,128 @@ commands:
       - name: list
         description: Show ufw status and numbered rules
         aliases: [show, status]
+      - name: ingress
+        description: Ingress IP rules (ufw) — port/proto aware
+        subcommands:
+          - name: allow
+            description: Allow ingress from IP/CIDR to port
+            args:
+              - name: ip
+                description: Source IP/CIDR
+          - name: deny
+            description: Deny ingress from IP/CIDR
+            args:
+              - name: ip
+                description: Source IP/CIDR
+          - name: remove
+            description: Remove ingress rule
+            aliases: [delete]
+            args:
+              - name: ip
+                description: IP/CIDR to remove
+      - name: egress
+        description: Egress IP rules (ufw) — port/proto aware
+        subcommands:
+          - name: allow
+            description: Allow egress to DST
+            args:
+              - name: dst
+                description: Destination IP/CIDR or any
+          - name: deny
+            description: Deny egress to DST
+            args:
+              - name: dst
+                description: Destination IP/CIDR or any
+          - name: remove
+            description: Remove egress rule
+            aliases: [delete]
+            args:
+              - name: dst
+                description: DST to remove
+          - name: enforce
+            description: Default deny outgoing
+            aliases: [lockdown]
+
+  - name: policy
+    description: Network policy (sbx parity) — domain + IP allow/deny, presets (exa.ai, npm, pypi, github)
+    subcommands:
+      - name: init
+        description: Initialize preset (balanced|open|locked)
+        args:
+          - name: preset
+            enum: [balanced, open, locked, allow-all, deny-all]
+      - name: ls
+        description: List active policy rules
+        aliases: [list, show, status]
+        flags:
+          - name: --wide
+            flag: --wide
+          - name: --json
+            flag: --json
+          - name: --sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+      - name: allow
+        description: Allow network host/cidr/wildcard
+        args:
+          - name: type
+            enum: [network]
+          - name: resource
+            description: Host/wildcard/** or CIDR
+      - name: deny
+        description: Deny network host/cidr
+        args:
+          - name: type
+            enum: [network]
+          - name: resource
+            description: Host or CIDR to deny
+      - name: rm
+        description: Remove rule by --resource
+        aliases: [remove, delete]
+        flags:
+          - name: --resource
+            flag: --resource
+            args:
+              - name: host
+                type: string
+          - name: --id
+            flag: --id
+            args:
+              - name: id
+                type: string
+          - name: --sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+      - name: check
+        description: Check if host would be allowed
+        args:
+          - name: type
+            enum: [network]
+          - name: target
+            description: Host, host:port, or URL
+      - name: reset
+        description: Wipe policy and re-init
+        flags:
+          - name: --force
+            flag: --force
+      - name: preset
+        description: Presets (list|apply|diff)
+        subcommands:
+          - name: list
+            description: Show presets
+          - name: apply
+            description: Apply preset
+            args:
+              - name: preset
+                enum: [balanced, open, locked]
+          - name: diff
+            description: Diff preset vs active
+      - name: dump
+        description: Dump Docker Sandbox preset if sbx present
 
   - name: volumes
     description: Show volume mount info and disk usage (via gdu) — alias for tools volumes

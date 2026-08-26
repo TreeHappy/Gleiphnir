@@ -29,6 +29,7 @@ Usage:
   fenrir tools clean:all                   Remove all personal tool installs
   fenrir tools volumes [--gdu]             Show volume mount info and disk usage (via gdu)
   fenrir tools browse [path]               Browse tool volumes with yazi (yasi)
+  fenrir tools search QUERY [--source npm|pypi|crates|go|github|exa]  Proxy-aware search (npm/pypi/github/exa)
   fenrir browse [path]                     Browse filesystem with yazi (yasi)
   fenrir volumes                           Alias for `fenrir tools volumes`
   fenrir user add <user> [--key-file|--key]  Create a sandbox user
@@ -38,14 +39,16 @@ Usage:
   fenrir sbom container|tools|vm|all [--format] [--output]  Generate SBOM
   fenrir journal [flags]                   Query the agent audit journal
   fenrir proxy [--listen-port][--log-dir][--otel-endpoint]  MITM HTTP proxy
-  fenrir firewall allow|deny|remove|enforce|list  Manage VM firewall (ufw)
+  fenrir firewall allow|deny|remove|enforce|list  Manage VM firewall (ufw) (deprecated → policy)
+  fenrir firewall ingress|egress allow|deny|remove  Egress/ingress IP rules (ufw)
+  fenrir policy init|ls|allow|deny|rm|check|reset|preset  Network policy (sbx parity, domain + IP)
   fenrir --help                            Show this help
 
 Delegation:
   - volumes → gdu (go disk usage) when available, else du
   - browse  → yazi (yasi) when available, else ls
   - other tools subcommands → sandbox-tools (if present) or built-in fallback
-  - other categories → sandbox-user / sandbox-secrets / sandbox-sbom / sandbox-journal / sandbox-proxy / sandbox-firewall
+  - other categories → sandbox-user / sandbox-secrets / sandbox-sbom / sandbox-journal / sandbox-proxy / sandbox-firewall / sandbox-policy
 
 Aliases:
   fen  → fenrir
@@ -54,8 +57,12 @@ Examples:
   fenrir tools list
   fenrir tools volumes           # gdu /opt/mise-shared
   fenrir tools volumes --gdu     # force gdu TUI
+  fenrir tools search "http client" --source npm
   fenrir browse /work            # yazi
   fenrir user list
+  fenrir policy ls --wide
+  fenrir policy allow network api.exa.ai
+  fenrir policy check network registry.npmjs.org
   fenrir sbom all --format cyclonedx
   fenrir journal --last 50 --grep git
 USAGE
@@ -201,6 +208,10 @@ cmd_tools() {
     browse)
       run_yazi "${1:-/opt/mise-shared}"
       ;;
+    search)
+      if delegate_or_fallback sandbox-tools search "$@"; then return; fi
+      die "sandbox-tools search not found (requires sandbox-tools with search)"
+      ;;
     ""|-h|--help|help)
       cat <<'HELP'
 fenrir tools — inspect and manage mise tool installs (via gdu/yazi)
@@ -212,6 +223,7 @@ Usage:
   fenrir tools clean:all
   fenrir tools volumes [--gdu|--no-gdu]   # gdu for disk analysis
   fenrir tools browse [path]              # yazi (yasi) file manager
+  fenrir tools search QUERY [--source npm|pypi|crates|go|github|exa] # proxy-aware search
 HELP
       ;;
     *) die "unknown fenrir tools subcommand: $sub (see fenrir tools --help)" ;;
@@ -262,6 +274,12 @@ case "$CMD" in
     ;;
   firewall)
     delegate_or_fallback sandbox-firewall "$@" || die "sandbox-firewall not found"
+    ;;
+  policy)
+    delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
+    ;;
+  firewall:policy) # compat
+    delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
     ;;
   -h|--help|help)
     usage; exit 0

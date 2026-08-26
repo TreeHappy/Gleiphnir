@@ -133,6 +133,43 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewa
 description = "Lock down SSH to allow-listed IPs only (removes bootstrap open rule)"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-firewall.ps1' enforce"
 
+# ── policy (sbx policy parity, proxies to sandbox-policy + ufw) ──────────────
+[tasks.'policy:init']
+description = "Init network policy preset: mise run policy:init [balanced|open|locked]"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' init"
+
+[tasks.'policy:ls']
+description = "List policy rules: mise run policy:ls [--wide] [--sandbox NAME]"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' ls"
+
+[tasks.'policy:allow']
+description = "Allow network host/cidr: mise run policy:allow network registry.npmjs.org [--sandbox NAME]"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' allow"
+
+[tasks.'policy:deny']
+description = "Deny network host/cidr: mise run policy:deny network evil.com"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' deny"
+
+[tasks.'policy:rm']
+description = "Remove policy rule: mise run policy:rm network --resource evil.com"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' rm"
+
+[tasks.'policy:check']
+description = "Check if host would be allowed: mise run policy:check network api.github.com:443"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' check"
+
+[tasks.'policy:reset']
+description = "Reset policy (clear custom rules, re-init balanced)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' reset"
+
+[tasks.'policy:preset']
+description = "Manage presets: mise run policy:preset list|apply"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-policy.ps1' preset"
+
+[tasks.'policy:dump']
+description = "Dump Docker Sandbox preset if sbx present (or show balanced.txt)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/dump-docker-preset.ps1'"
+
 # ── container ──────────────────────────────────────────────────────────────
 [tasks.'container:build']
 description = "Build the sandbox container image inside the running VM"
@@ -179,6 +216,10 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.
 [tasks.'tools:volumes']
 description = "Show volume mount info and disk usage inside the VM"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' volumes"
+
+[tasks.'tools:search']
+description = "Proxy-aware search over package managers + GitHub + Exa AI: mise run tools:search QUERY"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/manage-tools.ps1' search"
 
 # ── observability (Grafana LGTM) ───────────────────────────────────────────
 [tasks.'obs:start']

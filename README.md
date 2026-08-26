@@ -154,9 +154,15 @@ hunk diff                          # review-first diff viewer
 leaf README.md                     # markdown reader
 mise use node@22                   # extra tools install into shared cache
 
-# 7. Firewall (ufw inside the VM) — either via fenrir (in-container) or gleiphnir (host)
+# 7. Policy (egress/ingress) — via fenrir/gleiphnir policy (sbx parity)
+gleiphnir policy init balanced      # first run prompts: open/balanced/locked (default balanced)
+gleiphnir policy ls --wide
+gleiphnir policy allow network registry.npmjs.org
+gleiphnir policy allow network api.exa.ai   # exa.ai websearch (https://exa.ai/)
+gleiphnir policy check network https://api.github.com:443
+# Legacy ufw fw still works (compat):
 fenrir firewall allow 203.0.113.42
-gleiphnir fw allow IP=203.0.113.42  # let your IP reach SSH
+gleiphnir fw allow IP=203.0.113.42  # let your IP reach SSH (compat)
 gleiphnir fw list
 gleiphnir fw enforce                # drop bootstrap rule → strict allow-list only
 
@@ -178,19 +184,26 @@ All tunables live in `config/sandbox.env` (loaded by mise `[env]` + `lib.ps1`). 
 | `QEMU_MONITOR_PORT` | `4444` | Monitor TCP port on Windows hosts (unix socket on Linux) |
 | `VM_CPUS` / `VM_RAM_MB` | `4` / `4096` | |
 
-## Firewall (ufw)
+## Policy (egress/ingress) + Firewall (ufw)
 
-The guest owns all firewalling — the host stays untouched. Provision opens tcp/22 to *any* via a bootstrap rule (never locks you out); then:
+Guest owns all policy — host untouched. Presets: `open` (**), `balanced` (deny + curated allowlist `vm/guest/policy-presets/balanced.txt`: npm, pypi, crates, go, nuget, maven, apt, mise, docker, github, vscode, blob, exa.ai/api.exa.ai …), `locked` (deny all). Provision opens `tcp/22` to *any* (bootstrap) + init `balanced`.
 
 ```powershell
-gleiphnir fw allow IP=<your-ip>    # or: fenrir firewall allow <your-ip>
-gleiphnir fw enforce               # remove bootstrap → strict allow-list only
-gleiphnir fw deny  IP=192.0.2.77   # block an IP everywhere
-gleiphnir fw remove IP=...         # undo
-# mise run fw:allow IP=... still works (gleiphnir wraps mise)
+gleiphnir policy init balanced     # like sbx policy init balanced (prompts on first run)
+gleiphnir policy ls --wide         # see preset + global allow/deny
+gleiphnir policy allow network registry.npmjs.org   # domain → proxy allowlist
+gleiphnir policy allow network "*.exa.ai"            # exa.ai websearch
+gleiphnir policy allow network api.exa.ai --sandbox alice  # per-sandbox
+gleiphnir policy check network https://evil.com:443  # Allowed/Denied
+gleiphnir policy deny network evil.com
+gleiphnir policy rm network --resource evil.com
+gleiphnir fw allow IP=<your-ip>    # IP/CIDR → ufw (compat, deprecated → policy allow network CIDR)
+gleiphnir fw enforce               # remove bootstrap 22/any → strict
+# mise run policy:allow network … still works (gle wraps mise)
 ```
 
-In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP rules are meaningful only in bridge mode (Linux).
+Docs: `docs/policy.md` (global one-short, git-style) + breakout `docs/policy/*.md` per subcommand, `docs/tools-search.md` for `gle tools search`.
+Domains matched with `*.host` / `**`; deny wins. Proxy (`mitmproxy` `8080`) enforces domains; `ufw` enforces CIDR + egress default (`allow` in `open`, `deny` + `allow out 53,80,443` in `balanced/locked`). In `user` NAT mode, per-IP ingress is limited (bridge preserves IPs).
 
 ## Container & mise
 
@@ -200,7 +213,7 @@ In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP r
 - **Per-user home volume** (`gleiphnir-home-<user>`): `~/.cache`, `~/.local` (atuin history!), `~/.config` persist across restarts.
 - **Dotfiles via mise**: bashrc / pwsh profile / gitconfig ship at `/etc/sandbox/dotfiles` and are linked by the `dotfiles` mise task on each start. Personal overrides: put same-named files in `/work/dotfiles/`.
 - **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi/yasi file manager, gdu disk analyzer, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
-- **Shell completion**: Carapace provides nested tab completion for **Fenrir** (`fenrir`/`fen`, in-container → `gdu`/`yazi`) and **Gleiphnir** (`gleiphnir`/`gle`, host → `mise run …`) plus enhanced mise task completions. Specs ship in the container image at `/etc/carapace/specs/` (`fenrir.yaml`, `gleiphnir.yaml`, `mise.yaml`). See `docs/commands.md`.
+- **Shell completion**: Carapace provides nested tab completion for **Fenrir** (`fenrir`/`fen`, in-container → `gdu`/`yazi`, spec `container/files/carapace/specs/fenrir.yaml` → `/etc/carapace/specs`) and **Gleiphnir** (`gleiphnir`/`gle`, host → `mise run …`, **host-only** spec `vm/files/carapace/specs/gleiphnir.yaml` → `~/.config/carapace/specs/` via `vm/scripts/`) plus `mise` (`mise.yaml`). Specs never run tools — they only describe nested `commands` for `carapace` (`CARAPACE_SPEC_DIR=/etc/carapace/specs` via `bashrc:23`). See `docs/commands.md` and `docs/policy.md` (host spec: `vm/...` not `container/...`).
 - **OTel tracing**: host-side pwsh scripts emit OpenTelemetry spans via `otel-cli` (installed via mise) — visible in Grafana Tempo when observability is enabled.
 
 ## Sandbox users & workspaces

@@ -77,21 +77,21 @@ commands:
         description: List sandbox users (proxies to VM)
 
   - name: fw
-    description: Firewall (proxies to guest ufw, wraps mise run fw:*)
+    description: Firewall (deprecated → policy, proxies to guest ufw, wraps mise run fw:*)
     aliases: [firewall]
     subcommands:
       - name: allow
-        description: Allow an IP to SSH to the VM: gleiphnir fw allow IP=1.2.3.4
+        description: Allow an IP to SSH to the VM (deprecated — use policy allow): gleiphnir fw allow IP=1.2.3.4
         args:
           - name: ip
             description: IP address or CIDR
       - name: deny
-        description: Block an IP at the VM firewall: gleiphnir fw deny IP=1.2.3.4
+        description: Block an IP at the VM firewall (deprecated — use policy deny): gleiphnir fw deny IP=1.2.3.4
         args:
           - name: ip
             description: IP address or CIDR
       - name: remove
-        description: Remove an IP from allow/deny rules: gleiphnir fw remove IP=1.2.3.4
+        description: Remove an IP from allow/deny rules (deprecated): gleiphnir fw remove IP=1.2.3.4
         aliases: [delete, unallow, undeny]
         args:
           - name: ip
@@ -102,6 +102,99 @@ commands:
       - name: enforce
         description: Lock down SSH to allow-listed IPs only (removes bootstrap open rule)
         aliases: [lockdown]
+
+  - name: policy
+    description: Network policy (sbx parity) — egress/ingress allow/deny, presets, per-sandbox (wraps mise run policy:*)
+    aliases: [firewall-policy]
+    subcommands:
+      - name: init
+        description: Initialize preset (balanced|open|locked) — prompts if omitted
+        args:
+          - name: preset
+            description: Preset name
+            enum: [balanced, open, locked, allow-all, deny-all]
+      - name: ls
+        description: List active policy rules (global + per-sandbox)
+        aliases: [list, show, status]
+        flags:
+          - name: --wide
+            description: Detailed view with hosts and ufw
+            flag: --wide
+          - name: --json
+            description: Raw JSON
+            flag: --json
+          - name: --sandbox
+            description: Filter by sandbox name
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+      - name: allow
+        description: Allow network host/cidr/wildcard (proxy or ufw)
+        args:
+          - name: type
+            description: Resource type
+            enum: [network]
+          - name: resource
+            description: Host, wildcard (*.github.com), **, or CIDR
+      - name: deny
+        description: Deny network host/cidr
+        args:
+          - name: type
+            description: Resource type
+            enum: [network]
+          - name: resource
+            description: Host or CIDR to block
+      - name: rm
+        description: Remove rule by --resource or --id
+        aliases: [remove, delete]
+        flags:
+          - name: --resource
+            description: Host/CIDR to remove
+            flag: --resource
+            args:
+              - name: host
+                type: string
+          - name: --id
+            description: Rule ID
+            flag: --id
+            args:
+              - name: id
+                type: string
+          - name: --sandbox
+            description: Scoped sandbox
+            flag: --sandbox
+            args:
+              - name: name
+                type: string
+      - name: check
+        description: Test if host:port would be allowed
+        args:
+          - name: type
+            description: Resource type
+            enum: [network]
+          - name: target
+            description: Host, host:port, or URL
+      - name: reset
+        description: Wipe local policy and re-init balanced
+        flags:
+          - name: --force
+            description: Skip confirmation
+            flag: --force
+      - name: preset
+        description: Manage presets (list|apply|diff)
+        subcommands:
+          - name: list
+            description: Show available presets
+          - name: apply
+            description: Apply preset (balanced|open|locked)
+            args:
+              - name: preset
+                enum: [balanced, open, locked]
+          - name: diff
+            description: Diff preset vs active
+      - name: dump
+        description: Dump Docker Sandbox preset if sbx present
 
   - name: container
     description: Sandbox container image
@@ -196,6 +289,21 @@ commands:
         description: Remove all personal tool installs (prompts for confirmation)
       - name: volumes
         description: Show volume mount info and disk usage inside the VM
+      - name: search
+        description: Proxy-aware search over package managers + GitHub + Exa AI (exa.ai)
+        args:
+          - name: query
+            description: Search query
+        flags:
+          - name: --source
+            description: Source filter
+            flag: --source
+            args:
+              - name: src
+                enum: [npm, pypi, crates, go, github, exa, auto]
+          - name: --json
+            description: JSON output
+            flag: --json
 
   - name: obs
     description: Observability (Grafana LGTM)

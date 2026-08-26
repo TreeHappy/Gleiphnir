@@ -74,6 +74,7 @@ Set-Default 'OBSERVABILITY_OTLP_PORT'           '4317'
 Set-Default 'OBSERVABILITY_PROM_PORT'           '9090'
 Set-Default 'OBSERVABILITY_PROXY_ENABLED'       'true'
 Set-Default 'OBSERVABILITY_SESSION_LOGGING'     'true'
+Set-Default 'POLICY_PRESET'                      'balanced'
 Set-Default 'OTEL_EXPORTER_OTLP_ENDPOINT'       ''
 Set-Default 'OTEL_SERVICE_NAME'                  'gleiphnir-host'
 

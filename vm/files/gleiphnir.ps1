@@ -12,10 +12,11 @@ Usage:
   gleiphnir network up|down|status
   gleiphnir vm prepare|start|stop|kill|console|ssh|ssh:wait|info|clean|clean:all
   gleiphnir user add|remove|list
-  gleiphnir fw allow|deny|remove|list|enforce
+  gleiphnir fw allow|deny|remove|list|enforce (deprecated → policy)
+  gleiphnir policy init|ls|allow|deny|rm|check|reset|preset   Network policy (sbx parity)
   gleiphnir container build|info
   gleiphnir sbom container|tools|vm|all
-  gleiphnir tools list|info|clean|clean:all|volumes
+  gleiphnir tools list|info|clean|clean:all|volumes|search
   gleiphnir obs start|stop|status|open|deploy|clean
   gleiphnir secrets init|encrypt|decrypt|sync|list|status
   gleiphnir up|down|smoke
@@ -113,14 +114,31 @@ switch ($cmd) {
     }
   }
   'tools' {
-    if ($rest.Count -eq 0) { Write-Host "Usage: gleiphnir tools list|info|clean|clean:all|volumes"; exit 1 }
+    if ($rest.Count -eq 0) { Write-Host "Usage: gleiphnir tools list|info|clean|clean:all|volumes|search"; exit 1 }
     switch ($rest[0]) {
       'list'      { Invoke-MiseTask 'tools:list' $rest[1..($rest.Count-1)] }
       'info'      { Invoke-MiseTask 'tools:info' $rest[1..($rest.Count-1)] }
       'clean'     { Invoke-MiseTask 'tools:clean' $rest[1..($rest.Count-1)] }
       'clean:all' { Invoke-MiseTask 'tools:clean:all' $rest[1..($rest.Count-1)] }
       'volumes'   { Invoke-MiseTask 'tools:volumes' $rest[1..($rest.Count-1)] }
+      'search'    { Invoke-MiseTask 'tools:search' $rest[1..($rest.Count-1)] }
       default { Write-Error "unknown gleiphnir tools subcommand: $($rest[0])"; exit 1 }
+    }
+  }
+  'policy' {
+    if ($rest.Count -eq 0) { Write-Host "Usage: gleiphnir policy init|ls|allow|deny|rm|check|reset|preset"; exit 1 }
+    $sub = $rest[0]; $extra = @(); if ($rest.Count -gt 1) { $extra = $rest[1..($rest.Count-1)] }
+    switch ($sub) {
+      'init'    { Invoke-MiseTask 'policy:init' $extra }
+      { $_ -in @('ls','list','show','status') } { Invoke-MiseTask 'policy:ls' $extra }
+      'allow'   { Invoke-MiseTask 'policy:allow' $extra }
+      'deny'    { Invoke-MiseTask 'policy:deny' $extra }
+      { $_ -in @('rm','remove','delete') } { Invoke-MiseTask 'policy:rm' $extra }
+      'check'   { Invoke-MiseTask 'policy:check' $extra }
+      'reset'   { Invoke-MiseTask 'policy:reset' $extra }
+      'preset'  { Invoke-MiseTask 'policy:preset' $extra }
+      'dump'    { Invoke-MiseTask 'policy:dump' $extra }
+      default { Write-Error "unknown gleiphnir policy subcommand: $sub"; exit 1 }
     }
   }
   'obs' {
