@@ -6,6 +6,32 @@ Each developer SSHes into an Ubuntu VM and lands directly in an **ephemeral, rea
 
 Host-side orchestration is pure **PowerShell (`pwsh`)** driven by **mise tasks** — identical commands work on Linux and Windows.
 
+## TL;DR
+
+**Gleiphnir** gives each developer an isolated, ephemeral Linux sandbox (Podman container inside a QEMU VM) accessible via SSH. Ships with pwsh, neovim, git, dotnet, node, python, go, and more — all managed by mise. Toolchains download once and are shared across users.
+
+| Platform | Local dev | Server / remote access |
+|----------|-----------|----------------------|
+| **Linux** | [`docs/linux-local.md`](docs/linux-local.md) | [`docs/linux-server.md`](docs/linux-server.md) |
+| **Windows** | [`docs/windows-local.md`](docs/windows-local.md) | [`docs/windows-server.md`](docs/windows-server.md) |
+
+**Fastest start (Linux):**
+
+```bash
+curl https://mise.run | sh && mise install
+mise run up
+mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
+ssh -p 2222 alice@127.0.0.1
+mise run down
+```
+
+**Fastest start (Windows):**
+
+```powershell
+mise run up
+ssh -p 2222 admin@127.0.0.1
+```
+
 ## Architecture
 
 ```
@@ -34,8 +60,8 @@ Host (Linux+KVM or Windows+WHPX/TCG)
 
 - **pwsh 7+** ([PowerShell](https://learn.microsoft.com/powershell/) — `snap install powershell --classic` / `winget install Microsoft.PowerShell`)
 - **mise** (`curl https://mise.run | sh`) — task runner; `mise install` at repo root
-- Linux hosts: `qemu-system-x86_64`, `qemu-img`, plus *one* of cloud-localds / genisoimage / `pip install pycdlib`; bridge mode additionally needs `ip`, `iptables`
-- Windows hosts: [QEMU for Windows](https://qemu.weilnetz.de/) on PATH, OpenSSH client, git, python3 (+ `pip install pycdlib`). Enable *Virtual Machine Platform* for WHPX acceleration, or set `QEMU_ACCEL=tcg`.
+- Linux hosts: `qemu-system-x86_64`, `qemu-img`, plus *one* of cloud-localds / genisoimage / `pip install pycdlib`; bridge mode additionally needs `ip`, `iptables`. See [`docs/linux-local.md`](docs/linux-local.md) for local setup or [`docs/linux-server.md`](docs/linux-server.md) for remote server mode.
+- Windows hosts: [QEMU for Windows](https://qemu.weilnetz.de/) on PATH, OpenSSH client, git, python3 (+ `pip install pycdlib`). Enable *Virtual Machine Platform* for WHPX acceleration, or set `QEMU_ACCEL=tcg`. See [`docs/windows-local.md`](docs/windows-local.md) for local setup or [`docs/windows-server.md`](docs/windows-server.md) for remote server mode.
 
 ```bash
 mise run deps   # verifies your platform's toolchain
