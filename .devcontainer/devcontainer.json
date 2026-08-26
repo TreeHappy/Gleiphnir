@@ -11,6 +11,7 @@
         "ghcr.io/devcontainers/features/sshd:1": {},
         "ghcr.io/devcontainers-extra/features/mise:1": {}
     },
+    "postCreateCommand": "bash -c 'sed -i \"s|~/.local/bin/mise|mise|g\" ~/.bashrc || true; if grep -q \"mise activate bash\" ~/.bashrc; then sed -i \"s|.*mise activate bash.*|command -v mise >/dev/null 2>\\&1 \\&\\& eval \\\"\\$(mise activate bash)\\\"|\" ~/.bashrc; else echo \"command -v mise >/dev/null 2>&1 && eval \\\"\\$(mise activate bash)\\\"\" >> ~/.bashrc; fi'",
     "forwardPorts": [
         2222
     ],

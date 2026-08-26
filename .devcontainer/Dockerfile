@@ -15,5 +15,16 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && chmod 0440 /etc/sudoers.d/${TAMINARU_USER} \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensure mise activation is in .bashrc (idempotent, fixes legacy ~/.local/bin path, guarded)
+RUN bash -c ' \
+        sed -i "s|~/.local/bin/mise|mise|g" /home/${TAMINARU_USER}/.bashrc || true; \
+        if grep -q "mise activate bash" /home/${TAMINARU_USER}/.bashrc; then \
+            sed -i "s|.*mise activate bash.*|command -v mise >/dev/null 2>\&1 \&\& eval \"\$(mise activate bash)\"|" /home/${TAMINARU_USER}/.bashrc; \
+        else \
+            echo "command -v mise >/dev/null 2>&1 && eval \"\$(mise activate bash)\"" >> /home/${TAMINARU_USER}/.bashrc; \
+        fi; \
+        chown ${TAMINARU_USER}:${TAMINARU_USER} /home/${TAMINARU_USER}/.bashrc \
+    '
+
 USER ${TAMINARU_USER}
 WORKDIR /home/${TAMINARU_USER}
