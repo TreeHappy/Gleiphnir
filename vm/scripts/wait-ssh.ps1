@@ -2,49 +2,52 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
-$timeoutSecs = 180
-$interval    = 3
+$timeoutSecs = 600
+$interval    = 5
 $elapsed     = 0
 
-# Targets to poll: direct + forward in bridge mode, forward only in user mode
-$targets = @()
-if ($env:NETWORK_MODE -eq 'user') {
-    $targets += @{ Host = '127.0.0.1'; Port = [int]$HOST_SSH_FORWARD_PORT }
-} else {
-    $targets += @{ Host = $VM_IP;      Port = 22 }
-    $targets += @{ Host = '127.0.0.1'; Port = [int]$HOST_SSH_FORWARD_PORT }
-}
+# Always use the forward port (works in both user and bridge mode)
+$forwardPort = [int]$HOST_SSH_FORWARD_PORT
 
-Write-Host "Waiting for VM SSH (timeout ${timeoutSecs}s, mode: $($env:NETWORK_MODE)) ..."
-
-function script:Try-Ssh([hashtable]$t) {
-    $sshArgs = @() + (Get-KeyArgs) + (Get-SshCommonArgs) +
-        @('-o', 'ConnectTimeout=2')
-    if ($t.Host -eq '127.0.0.1') { $sshArgs += @('-p', "$($t.Port)") }
-    $sshArgs += "$($env:ADMIN_USER)@$($t.Host)"
-    $sshArgs += 'true'
-    & ssh @sshArgs *>$null
-    return ($LASTEXITCODE -eq 0)
-}
-
+# Step 1: TCP check via bash (more reliable than PowerShell TcpClient in containers)
+Write-Host "Waiting for VM SSH (timeout ${timeoutSecs}s, forward: 127.0.0.1:${forwardPort}) ..."
 while ($elapsed -lt $timeoutSecs) {
-    foreach ($t in $targets) {
-        if (Try-Ssh $t) {
-            Write-Host "VM SSH is up at $($t.Host):$($t.Port) (${elapsed}s elapsed)"
-            Write-Host "Checking cloud-init status ..."
-            $remote = 'cloud-init status --wait 2>&1 | tail -5; echo ---; systemctl is-active podman 2>&1 | head -5; echo ---; podman images 2>&1 | head -10'
-            $sshArgs = @() + (Get-KeyArgs) + (Get-SshCommonArgs)
-            if ($t.Host -eq '127.0.0.1') { $sshArgs += @('-p', "$($t.Port)") }
-            $sshArgs += "$($env:ADMIN_USER)@$($t.Host)"
-            $sshArgs += $remote
-            & ssh @sshArgs 2>$null
-            exit 0
-        }
+    $tcpOk = & bash -c "echo >/dev/tcp/127.0.0.1/$forwardPort" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "TCP port ${forwardPort} open (${elapsed}s elapsed) — waiting for sshd ..."
+        break
     }
-    $label = (($targets | ForEach-Object { "$($_.Host):$($_.Port)" }) -join ', ')
-    Write-Host ("{0,4}s — not yet (targets: {1})" -f $elapsed, $label)
+    Write-Host ("{0,4}s — port not yet open" -f $elapsed)
     Start-Sleep -Seconds $interval
     $elapsed += $interval
 }
 
-Write-Error "Timed out after ${timeoutSecs}s waiting for VM SSH`nCheck: mise run vm:console or mise run vm:info"
+if ($elapsed -ge $timeoutSecs) {
+    Write-Error "Timed out after ${timeoutSecs}s waiting for TCP 127.0.0.1:${forwardPort}`nCheck: mise run vm:console or mise run vm:info"
+}
+
+# Step 2: wait for SSH to accept commands (sshd may still be starting under slow TCG)
+$sshTimeout = 300
+$sshElapsed = 0
+while ($sshElapsed -lt $sshTimeout) {
+    $sshArgs = @() + (Get-KeyArgs) + (Get-SshCommonArgs) +
+        @('-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes',
+          '-p', "$forwardPort",
+          "$($env:ADMIN_USER)@127.0.0.1", 'true')
+    & ssh @sshArgs 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "VM SSH is up at 127.0.0.1:${forwardPort} (${elapsed}s total elapsed)"
+        Write-Host "Checking cloud-init status ..."
+        $remote = 'cloud-init status --wait 2>&1 | tail -5; echo ---; systemctl is-active podman 2>&1 | head -5; echo ---; podman images 2>&1 | head -10'
+        $sshArgs2 = @() + (Get-KeyArgs) + (Get-SshCommonArgs) +
+            @('-p', "$forwardPort", "$($env:ADMIN_USER)@127.0.0.1", $remote)
+        & ssh @sshArgs2 2>$null
+        exit 0
+    }
+    Write-Host ("{0,4}s — sshd not ready yet" -f $elapsed)
+    Start-Sleep -Seconds $interval
+    $elapsed += $interval
+    $sshElapsed += $interval
+}
+
+Write-Error "Timed out after ${sshTimeout}s SSH attempts (TCP was open).`nCheck: mise run vm:console or mise run vm:info"

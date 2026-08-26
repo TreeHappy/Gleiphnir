@@ -7,6 +7,13 @@ Write-Host "==> Preparing VM (mode: $($env:NETWORK_MODE))"
 Require-BaseImage
 if (-not (Test-Path -LiteralPath $IMAGES_DIR)) { New-Item -ItemType Directory -Path $IMAGES_DIR -Force | Out-Null }
 
+# ── detect TUN availability for bridge mode ────────────────────────────────
+if ($env:NETWORK_MODE -eq 'bridge' -and -not $IsWin -and -not (Test-Path '/dev/net/tun')) {
+    Write-Warning "/dev/net/tun not available — bridge mode requires TAP support."
+    Write-Warning "Switching to user-mode NAT for this run."
+    $env:NETWORK_MODE = 'user'
+}
+
 # ── admin SSH key ──────────────────────────────────────────────────────────
 if (-not (Test-Path -LiteralPath $ADMIN_SSH_KEY_PATH)) {
     Write-Host "Admin key not found at $ADMIN_SSH_KEY_PATH — generating one ..."

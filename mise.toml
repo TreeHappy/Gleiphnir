@@ -4,6 +4,8 @@
 # Run `mise tasks ls` to list, `mise run <task>` to execute.
 
 [tools]
+opencode = "latest"
+powershell = "latest"
 # mise itself is the only hard host requirement (plus pwsh + qemu, checked by `mise run deps`)
 
 [settings]
@@ -24,6 +26,10 @@ run = "mise tasks ls"
 description = "Check host dependencies (qemu, python/pycdlib, mise, pwsh)"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/deps.ps1'"
 
+[tasks.'install:deps']
+description = "Install missing host dependencies (qemu, python, pycdlib, apt packages)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/install-deps.ps1'"
+
 [tasks.'gen:key']
 description = "Generate admin SSH keypair if missing"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/gen-key.ps1'"
@@ -40,11 +46,11 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/image-info.ps
 # ── networking ─────────────────────────────────────────────────────────────
 [tasks.'network:up']
 description = "Create bridge + TAP (Linux hosts, requires sudo)"
-run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% else %}sudo -E pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% endif %}"
+run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% else %}sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% endif %}"
 
 [tasks.'network:down']
 description = "Remove bridge + TAP (Linux hosts, requires sudo)"
-run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% else %}sudo -E pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% endif %}"
+run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% else %}sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% endif %}"
 
 [tasks.'network:status']
 description = "Show bridge/TAP/iptables status"

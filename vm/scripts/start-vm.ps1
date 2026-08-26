@@ -25,26 +25,39 @@ if ($IsWin -and $networkMode -eq 'bridge') {
 }
 
 if ($networkMode -eq 'bridge' -and -not $IsWin) {
-    $null = & ip link show $BRIDGE_NAME 2>$null
-    $bridgeExists = ($LASTEXITCODE -eq 0)
-    if (-not $bridgeExists) {
-        Write-Host "Bridge $BRIDGE_NAME not found — creating (requires sudo) ..."
-        $isRoot = ((& id -u) -eq '0')
-        if ($isRoot) {
-            & (Join-Path $PSScriptRoot 'network-up.ps1')
-        } else {
-            & sudo -E pwsh -NoProfile -File (Join-Path $PSScriptRoot 'network-up.ps1')
-        }
+    # Check for TUN/TAP device — required for bridge mode
+    if (-not (Test-Path '/dev/net/tun')) {
+        Write-Warning "/dev/net/tun not available — bridge mode requires TAP support."
+        Write-Warning "Falling back to user-mode NAT for this run."
+        $networkMode = 'user'
+        $env:NETWORK_MODE = 'user'
     } else {
-        Write-Host "Bridge $BRIDGE_NAME exists."
-    }
-    # ensure iptables DNAT is present after reboot
-    $ipt = Get-Command iptables -ErrorAction SilentlyContinue
-    if ($ipt) {
-        & sudo iptables -t nat -C PREROUTING -p tcp --dport $HOST_SSH_FORWARD_PORT -j DNAT --to-destination "${VM_IP}:22" *>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Re-adding iptables DNAT rule ..."
-            & sudo -E pwsh -NoProfile -File (Join-Path $PSScriptRoot 'network-up.ps1') 2>&1 | Select-Object -Last 5
+        $null = & ip link show $BRIDGE_NAME 2>$null
+        $bridgeExists = ($LASTEXITCODE -eq 0)
+        if (-not $bridgeExists) {
+            Write-Host "Bridge $BRIDGE_NAME not found — creating (requires sudo) ..."
+            $isRoot = ((& id -u) -eq '0')
+            # Resolve full pwsh path for sudo (mise shims not on sudo PATH)
+            $pwshFull = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+            if (-not $pwshFull) { $pwshFull = 'pwsh' }
+            if ($isRoot) {
+                & (Join-Path $PSScriptRoot 'network-up.ps1')
+            } else {
+                & sudo -E $pwshFull -NoProfile -File (Join-Path $PSScriptRoot 'network-up.ps1')
+            }
+        } else {
+            Write-Host "Bridge $BRIDGE_NAME exists."
+        }
+        # ensure iptables DNAT is present after reboot
+        $ipt = Get-Command iptables -ErrorAction SilentlyContinue
+        if ($ipt) {
+            & sudo iptables -t nat -C PREROUTING -p tcp --dport $HOST_SSH_FORWARD_PORT -j DNAT --to-destination "${VM_IP}:22" *>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Re-adding iptables DNAT rule ..."
+                $pwshFull = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+                if (-not $pwshFull) { $pwshFull = 'pwsh' }
+                & sudo -E $pwshFull -NoProfile -File (Join-Path $PSScriptRoot 'network-up.ps1') 2>&1 | Select-Object -Last 5
+            }
         }
     }
 }
