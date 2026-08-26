@@ -1,46 +1,152 @@
 #!/usr/bin/env bash
 # /usr/local/bin/sandbox-proxy — MITM HTTP proxy for traffic observability
-# Runs mitmproxy in regular mode, logging all requests as JSONL to a file.
-# The OTel Collector tails these log files and ships them to Loki.
+# Runs mitmproxy with an addon that:
+#   1. Exports OTel spans (traces) to the local OTel Collector via OTLP/HTTP
+#   2. Logs JSONL to /var/log/sandbox/proxy-*.jsonl (fallback for Loki)
+#
+# Agents can propagate trace context by sending a W3C traceparent header:
+#   traceparent: 00-{traceId}-{parentSpanId}-01
+# The addon extracts traceId/parentSpanId and creates child spans.
 set -euo pipefail
 
 LOG_DIR="/var/log/sandbox"
 PROXY_PORT="${PROXY_PORT:-8080}"
-MITM_LOG="${LOG_DIR}/proxy-$(date +%Y%m%d-%H%M%S).jsonl"
+OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
 
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 
-# Create the mitmproxy addon script for JSONL logging
 ADDON=$(mktemp /tmp/mitmlog-XXXXXX.py)
 trap 'rm -f "$ADDON"' EXIT
 
 cat > "$ADDON" <<'ADDONEOF'
-"""mitmproxy addon: log all HTTP requests/responses as JSONL."""
+"""mitmproxy addon: export OTel spans + JSONL fallback for HTTP traffic."""
 import json
 import time
+import uuid
 from datetime import datetime, timezone
 from mitmproxy import http
-from mitmproxy.net.http import request as req_mod
+import urllib.request
+import urllib.error
 
-class JsonlLogger:
+OTEL_ENDPOINT = "http://127.0.0.1:4318/v1/traces"
+SERVICE_NAME = "sandbox-proxy"
+
+class HttpTrafficObserver:
     def __init__(self):
-        self.log_path = "/var/log/sandbox/proxy-latest.jsonl"
-        # Rotate log file based on time
         self._rotate_log()
 
     def _rotate_log(self):
         now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         self.log_path = f"/var/log/sandbox/proxy-{now}.jsonl"
-        self._rotate_after = time.time() + 3600  # rotate hourly
+        self._rotate_after = time.time() + 3600
+
+    def _export_span(self, span, resource_attrs):
+        """Export a single span to the OTel Collector via OTLP/HTTP."""
+        payload = {
+            "resourceSpans": [{
+                "resource": {"attributes": resource_attrs},
+                "scopeSpans": [{
+                    "scope": {"name": "mitmproxy"},
+                    "spans": [span]
+                }]
+            }]
+        }
+        try:
+            req = urllib.request.Request(
+                OTEL_ENDPOINT,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=2)
+        except Exception:
+            pass  # best-effort; JSONL fallback captures everything
 
     def response(self, flow: http.HTTPFlow):
         now = time.time()
         if now > getattr(self, '_rotate_after', 0):
             self._rotate_log()
 
+        # ── extract trace context from W3C traceparent header ────────────
+        trace_id = uuid.uuid4().hex
+        parent_span_id = ""
+        traceparent = flow.request.headers.get("traceparent", "")
+        if traceparent:
+            parts = traceparent.split("-")
+            if len(parts) >= 3:
+                trace_id = parts[1]  # 32-hex chars
+                parent_span_id = parts[2]  # 16-hex chars
+
+        span_id = uuid.uuid4().hex[:16]
+
+        start_ns = int(flow.request.timestamp_start * 1e9) if flow.request.timestamp_start else int(time.time() * 1e9)
+        end_ns = int(flow.response.timestamp_end * 1e9) if flow.response and flow.response.timestamp_end else int(time.time() * 1e9)
+        duration_ms = round((end_ns - start_ns) / 1e6)
+
+        status_code = flow.response.status_code if flow.response else 0
+
+        # ── build OTel span ──────────────────────────────────────────────
+        attributes = [
+            {"key": "http.method", "value": {"stringValue": flow.request.method}},
+            {"key": "http.url", "value": {"stringValue": flow.request.pretty_url}},
+            {"key": "http.host", "value": {"stringValue": flow.request.host}},
+            {"key": "http.port", "value": {"intValue": flow.request.port}},
+            {"key": "http.scheme", "value": {"stringValue": flow.request.scheme}},
+            {"key": "net.peer.name", "value": {"stringValue": flow.request.host}},
+            {"key": "net.peer.port", "value": {"intValue": flow.request.port}},
+            {"key": "duration.ms", "value": {"intValue": duration_ms}},
+        ]
+
+        if flow.request.headers.get("content-type"):
+            attributes.append({"key": "http.request.content_type", "value": {"stringValue": flow.request.headers["content-type"]}})
+        if flow.request.content:
+            attributes.append({"key": "http.request.size", "value": {"intValue": len(flow.request.content)}})
+
+        if flow.response:
+            attributes.append({"key": "http.response.status_code", "value": {"intValue": status_code}})
+            if flow.response.headers.get("content-type"):
+                attributes.append({"key": "http.response.content_type", "value": {"stringValue": flow.response.headers["content-type"]}})
+            if flow.response.content:
+                attributes.append({"key": "http.response.size", "value": {"intValue": len(flow.response.content)}})
+
+        # Status: OK for 2xx/3xx, ERROR for 4xx/5xx
+        status_code_enum = 0  # UNSET
+        if flow.response:
+            if 400 <= status_code < 600:
+                status_code_enum = 2  # ERROR
+            elif 200 <= status_code < 400:
+                status_code_enum = 1  # OK
+
+        span = {
+            "traceId": trace_id[:32].ljust(32, "0"),
+            "spanId": span_id,
+            "name": f"{flow.request.method} {flow.request.host}",
+            "kind": 3,  # SPAN_KIND_CLIENT
+            "startTimeUnixNano": str(start_ns),
+            "endTimeUnixNano": str(end_ns),
+            "status": {"code": status_code_enum},
+            "attributes": attributes,
+        }
+
+        if parent_span_id:
+            span["parentSpanId"] = parent_span_id[:16].ljust(16, "0")
+
+        # Resource attributes (service identity)
+        resource_attrs = [
+            {"key": "service.name", "value": {"stringValue": SERVICE_NAME}},
+            {"key": "service.namespace", "value": {"stringValue": "gleiphnir"}},
+        ]
+
+        # Export span to OTel Collector (best-effort)
+        self._export_span(span, resource_attrs)
+
+        # ── JSONL fallback for Loki ──────────────────────────────────────
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event": "http_request",
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id or None,
             "method": flow.request.method,
             "url": flow.request.pretty_url,
             "host": flow.request.host,
@@ -48,10 +154,10 @@ class JsonlLogger:
             "scheme": flow.request.scheme,
             "request_content_type": flow.request.headers.get("content-type", ""),
             "request_size": len(flow.request.content) if flow.request.content else 0,
-            "response_status": flow.response.status_code if flow.response else 0,
+            "response_status": status_code,
             "response_content_type": flow.response.headers.get("content-type", "") if flow.response else "",
             "response_size": len(flow.response.content) if flow.response and flow.response.content else 0,
-            "duration_ms": round((flow.response.timestamp_end - flow.request.timestamp_start) * 1000) if flow.response and flow.response.timestamp_end else 0,
+            "duration_ms": duration_ms,
         }
         try:
             with open(self.log_path, "a") as f:
@@ -59,13 +165,13 @@ class JsonlLogger:
         except Exception:
             pass
 
-addons = [JsonlLogger()]
+addons = [HttpTrafficObserver()]
 ADDONEOF
 
 echo "[sandbox-proxy] Starting mitmproxy on port $PROXY_PORT ..."
-echo "[sandbox-proxy] Logs: $MITM_LOG"
+echo "[sandbox-proxy] OTel endpoint: $OTEL_ENDPOINT"
+echo "[sandbox-proxy] JSONL logs: $LOG_DIR/proxy-*.jsonl"
 
-# Start mitmproxy with the JSONL logging addon
 exec mitmdump \
     --listen-host 0.0.0.0 \
     --listen-port "$PROXY_PORT" \

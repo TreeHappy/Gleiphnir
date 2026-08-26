@@ -120,6 +120,16 @@ COMMON_ARGS=(
   --hostname "sandbox"
 )
 
+# ── secrets: inject as env vars if enabled ──────────────────────────────────
+if [ -f /var/lib/sandbox/secrets-enabled ] && [ -f /var/lib/sandbox/secrets.env ]; then
+  while IFS= read -r line; do
+    # Skip comments and empty lines
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$line" ]] && continue
+    COMMON_ARGS+=(-e "$line")
+  done < /var/lib/sandbox/secrets.env
+fi
+
 # Add observability proxy env vars if enabled
 if [ "$OBS_ENABLED" = "1" ] && [ -f /var/lib/sandbox/observability-enabled ]; then
   # Check if mitmproxy is running

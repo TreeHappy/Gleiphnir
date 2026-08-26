@@ -119,6 +119,18 @@ __SESSION_LOGGER_CONTENT__
     content: |
 __SANDBOX_PROXY_CONTENT__
 
+  # secrets management (admin-only CLI for listing/setting secrets)
+  - path: /usr/local/bin/sandbox-secrets
+    permissions: '0755'
+    content: |
+__SANDBOX_SECRETS_CONTENT__
+
+  # journal query tool (journalctl-style for agent command history)
+  - path: /usr/local/bin/sandbox-journal
+    permissions: '0755'
+    content: |
+__SANDBOX_JOURNAL_CONTENT__
+
   # OTel Collector config (deployed by deploy-observability.ps1 at runtime)
   # Placeholder — actual config is deployed via SSH after VM boot
 

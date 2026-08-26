@@ -28,6 +28,8 @@ def main() -> int:
         "__START_PWSH_CONTENT__": f"{repo}/container/files/start-pwsh.sh",
         "__SESSION_LOGGER_CONTENT__": f"{repo}/vm/guest/bin/sandbox-session-logger",
         "__SANDBOX_PROXY_CONTENT__": f"{repo}/vm/guest/bin/sandbox-proxy",
+        "__SANDBOX_SECRETS_CONTENT__": f"{repo}/vm/guest/bin/sandbox-secrets",
+        "__SANDBOX_JOURNAL_CONTENT__": f"{repo}/vm/guest/bin/sandbox-journal",
     }
 
     p = pathlib.Path(tmpdir) / "user-data"

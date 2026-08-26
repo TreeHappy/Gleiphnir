@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# /usr/local/bin/sandbox-journal — query the agent audit journal (journalctl-style)
+# Reads JSONL journal entries from /var/log/sandbox/journal-*.jsonl and displays
+# them in a human-readable format.
+set -euo pipefail
+
+LOG_DIR="/var/log/sandbox"
+JOURNAL_PATTERN="${LOG_DIR}/journal-*.jsonl"
+
+usage() {
+  cat <<'USAGE'
+sandbox-journal — query the agent audit journal
+
+Usage:
+  sandbox-journal                     Show last 20 commands
+  sandbox-journal --last N            Show last N commands
+  sandbox-journal --user USER         Filter by user
+  sandbox-journal --session ID        Filter by session ID
+  sandbox-journal --grep PATTERN      Search commands (regex)
+  sandbox-journal --since DURATION    Filter by time (e.g. 1h, 30m, 7d)
+  sandbox-journal --failed            Only failed commands (exit_code != 0)
+  sandbox-journal --cwd PATH          Filter by working directory prefix
+  sandbox-journal --json              Output raw JSON (one object per line)
+  sandbox-journal --follow            Tail new entries (like tail -f)
+
+Duration formats: 30s, 5m, 1h, 7d
+USAGE
+}
+
+# Defaults
+LAST=20
+USER_FILTER=""
+SESSION_FILTER=""
+GREP_FILTER=""
+SINCE_FILTER=""
+FAILED_ONLY=0
+CWD_FILTER=""
+JSON_MODE=0
+FOLLOW_MODE=0
+
+# Parse args
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --last)     LAST="$2"; shift 2 ;;
+    --user)     USER_FILTER="$2"; shift 2 ;;
+    --session)  SESSION_FILTER="$2"; shift 2 ;;
+    --grep)     GREP_FILTER="$2"; shift 2 ;;
+    --since)    SINCE_FILTER="$2"; shift 2 ;;
+    --failed)   FAILED_ONLY=1; shift ;;
+    --cwd)      CWD_FILTER="$2"; shift 2 ;;
+    --json)     JSON_MODE=1; shift ;;
+    --follow)   FOLLOW_MODE=1; shift ;;
+    -h|--help)  usage; exit 0 ;;
+    *)          usage; exit 1 ;;
+  esac
+done
+
+# Check if any journal files exist
+if ! ls $JOURNAL_PATTERN >/dev/null 2>&1; then
+  echo "No journal files found in $LOG_DIR"
+  echo "Journal entries are created by sandbox shell hooks when observability is enabled."
+  exit 0
+fi
+
+# Build jq filter
+JQ_FILTER=""
+[ -n "$USER_FILTER" ]   && JQ_FILTER="$JQ_FILTER | select(.user == \"$USER_FILTER\")"
+[ -n "$SESSION_FILTER" ] && JQ_FILTER="$JQ_FILTER | select(.session_id == \"$SESSION_FILTER\")"
+[ -n "$GREP_FILTER" ]    && JQ_FILTER="$JQ_FILTER | select(.command | test(\"$GREP_FILTER\"))"
+[ -n "$CWD_FILTER" ]     && JQ_FILTER="$JQ_FILTER | select(.cwd | startswith(\"$CWD_FILTER\"))"
+[ "$FAILED_ONLY" = "1" ] && JQ_FILTER="$JQ_FILTER | select(.exit_code != 0)"
+
+# Time filter (convert duration to epoch)
+if [ -n "$SINCE_FILTER" ]; then
+  NOW=$(date +%s)
+  VALUE="${SINCE_FILTER%[smhd]}"
+  UNIT="${SINCE_FILTER: -1}"
+  case "$UNIT" in
+    s) SINCE_EPOCH=$((NOW - VALUE)) ;;
+    m) SINCE_EPOCH=$((NOW - VALUE * 60)) ;;
+    h) SINCE_EPOCH=$((NOW - VALUE * 3600)) ;;
+    d) SINCE_EPOCH=$((NOW - VALUE * 86400)) ;;
+    *) SINCE_EPOCH=$NOW ;;
+  esac
+  JQ_FILTER="$JQ_FILTER | select(.timestamp >= \"$(date -u -d @$SINCE_EPOCH +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r $SINCE_EPOCH +%Y-%m-%dT%H:%M:%S 2>/dev/null || echo 0)\")"
+fi
+
+JQ_FILTER="${JQ_FILTER# | }"  # remove leading pipe
+[ -z "$JQ_FILTER" ] && JQ_FILTER="."
+
+if [ "$FOLLOW_MODE" = "1" ]; then
+  tail -f $JOURNAL_PATTERN 2>/dev/null | jq -c "$JQ_FILTER" 2>/dev/null
+  exit $?
+fi
+
+# Combine all journal files, sort by timestamp, apply filters, take last N
+if [ "$JSON_MODE" = "1" ]; then
+  cat $JOURNAL_PATTERN 2>/dev/null | jq -c "$JQ_FILTER" 2>/dev/null | tail -n "$LAST"
+else
+  # Human-readable format
+  echo "TIMESTAMP                  USER       SESSION    EXIT  DURATION  COMMAND"
+  echo "─────────────────────────  ─────────  ─────────  ────  ────────  ───────"
+  cat $JOURNAL_PATTERN 2>/dev/null | jq -r "[ $JQ_FILTER ] | sort_by(.timestamp) | .[-${LAST}:][] | \
+    \"\(.timestamp | split(\".\")[0])  \(.user | .[0:10] | . + \"          \" | .[0:10])  \(.session_id | .[0:9] | . + \"         \" | .[0:9])  \(.exit_code | tostring | . + \"    \" | .[0:4])  \(.duration_ms | tostring | . + \"ms\" | . + \"        \" | .[0:8])  \(.command[0:60])\"" 2>/dev/null
+fi

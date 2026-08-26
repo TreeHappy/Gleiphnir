@@ -171,6 +171,31 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/deploy-observ
 description = "Remove LGTM container and data volume"
 run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/observability.ps1' clean"
 
+# ── secrets ────────────────────────────────────────────────────────────────
+[tasks.'secrets:init']
+description = "Generate age keypair for secrets encryption"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' init"
+
+[tasks.'secrets:encrypt']
+description = "Encrypt config/secrets.env → config/secrets.env.enc (age)"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' encrypt"
+
+[tasks.'secrets:decrypt']
+description = "Decrypt config/secrets.env.enc → config/secrets.env"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' decrypt"
+
+[tasks.'secrets:sync']
+description = "Sync encrypted secrets to VM and decrypt there"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' sync"
+
+[tasks.'secrets:list']
+description = "List configured secret key names on the VM"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' list"
+
+[tasks.'secrets:status']
+description = "Show secrets encryption and sync status"
+run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/secrets.ps1' status"
+
 # ── verification ───────────────────────────────────────────────────────────
 [tasks.smoke]
 description = "Quick smoke test (requires running VM)"

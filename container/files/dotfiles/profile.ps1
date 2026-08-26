@@ -29,8 +29,26 @@ if (Get-Command carapace -ErrorAction SilentlyContinue) {
     try { carapace _carapace | Out-String | Invoke-Expression } catch { }
 }
 
-# ── prompt: dev@sandbox:/work> ─────────────────────────────────────────────
-function prompt {
+# ── prompt + audit journal: log every command, then show prompt ─────────────
+# pwsh calls prompt() before each input line; it also logs the previous command.
+function Global:prompt {
+    $last = Get-History -Count 1
+    if ($last -and (Test-Path /var/log/sandbox)) {
+        $journal = "/var/log/sandbox/journal-${env:USER_NAME}.jsonl"
+        $duration = [math]::Round($last.EndExecutionTime.Subtract($last.StartExecutionTime).TotalMilliseconds)
+        $exitCode = if ($last.ExecutionStatus -eq "Completed") { 0 } else { 1 }
+        $entry = @{
+            timestamp  = (Get-Date -Format "o")
+            event      = "command"
+            user       = $env:USER_NAME
+            session_id = $env:SESSION_ID
+            command    = $last.CommandExecutionStatus
+            cwd        = (Get-Location).Path
+            exit_code  = $exitCode
+            duration_ms = $duration
+        } | ConvertTo-Json -Compress
+        Add-Content -Path $journal -Value $entry -ErrorAction SilentlyContinue
+    }
     $p = (Get-Location).Path
     if ($env:HOME -and $p.StartsWith($env:HOME)) { $p = '~' + $p.Substring($env:HOME.Length) }
     Write-Host -NoNewline -ForegroundColor Green  "dev@sandbox"
@@ -57,6 +75,7 @@ if ([Environment]::UserInteractive -and -not (Test-Path /work/.sandbox-welcomed)
 │ Shared tools volume:   /opt/mise-shared  (downloads once for all) │
 │ Default shell: pwsh · Editor: nvim · Diff pager: delta            │
 │ Tools via mise:        mise use node@lts / python@3.12 ...        │
+│ Audit journal:         sandbox-journal (query command history)     │
 └───────────────────────────────────────────────────────────────────┘
 '@ | Write-Host
     New-Item -ItemType File -Path /work/.sandbox-welcomed -Force -ErrorAction SilentlyContinue | Out-Null

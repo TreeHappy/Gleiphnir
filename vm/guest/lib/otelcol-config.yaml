@@ -50,6 +50,20 @@ receivers:
       signal.type: logs
       source: audit
 
+  # Journal logs — agent command audit trail (bash/pwsh hooks write here)
+  filelog/journal_logs:
+    include: ["/var/log/sandbox/journal-*.jsonl"]
+    fingerprint_size: 1kb
+    max_log_size: 1MB
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: "2006-01-02T15:04:05.999999999Z"
+    attributes:
+      signal.type: logs
+      source: journal
+
   # Prometheus receiver — scrapes node-exporter inside the VM
   prometheus:
     config:
@@ -93,7 +107,7 @@ exporters:
 service:
   pipelines:
     logs:
-      receivers: [otlp, filelog/session_logs, filelog/proxy_logs, filelog/audit_logs]
+      receivers: [otlp, filelog/session_logs, filelog/proxy_logs, filelog/audit_logs, filelog/journal_logs]
       processors: [resource, batch]
       exporters: [otlp/lgtm]
     metrics:

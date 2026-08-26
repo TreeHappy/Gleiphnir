@@ -44,6 +44,50 @@ alias gd='git diff'
 alias gl='git log --oneline --graph --decorate -n 20'
 alias md='leaf'          # markdown reader
 
+# ── audit journal: log every command after execution ────────────────────────
+# Writes JSONL entries to /var/log/sandbox/journal-<user>.jsonl
+# Each entry: timestamp, event, user, session_id, command, cwd, exit_code, duration_ms
+__sandbox_journal_log() {
+  local exit_code=$?
+  local cmd="$__sandbox_journal_cmd"
+  local start="$__sandbox_journal_start"
+  [ -z "$cmd" ] && return
+  # Skip journal internals and PROMPT_COMMAND
+  [[ "$cmd" == __sandbox_* ]] && return
+  [[ "$cmd" == __sandbox_journal_log ]] && return
+
+  local end
+  end=$(date +%s%N 2>/dev/null || echo 0)
+  local duration_ms=0
+  if [ -n "$start" ] && [ "$end" != "0" ] && [ -n "$end" ]; then
+    duration_ms=$(( (end - start) / 1000000 ))
+  fi
+
+  local cwd
+  cwd="$(pwd)"
+  local journal_file="/var/log/sandbox/journal-${USER_NAME:-$(id -un)}.jsonl"
+
+  printf '{"timestamp":"%s","event":"command","user":"%s","session_id":"%s","command":"%s","cwd":"%s","exit_code":%d,"duration_ms":%d}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" \
+    "${USER_NAME:-$(id -un)}" \
+    "${SESSION_ID:-$$}" \
+    "$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
+    "$cwd" \
+    "$exit_code" \
+    "$duration_ms" >> "$journal_file" 2>/dev/null || true
+}
+
+__sandbox_preexec() {
+  __sandbox_journal_cmd="$BASH_COMMAND"
+  __sandbox_journal_start=$(date +%s%N 2>/dev/null || date +%s)
+}
+
+# Only enable journal hooks if the log directory exists
+if [ -d /var/log/sandbox ]; then
+  trap '__sandbox_preexec' DEBUG
+  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;} __sandbox_journal_log"
+fi
+
 # Workspace reminder on first login
 if [ -t 1 ] && [ ! -f /work/.sandbox-welcomed ]; then
   cat <<'WELCOME'
@@ -54,6 +98,7 @@ if [ -t 1 ] && [ ! -f /work/.sandbox-welcomed ]; then
 │ Shared tools volume:   /opt/mise-shared  (downloads once for all) │
 │ Default shell: pwsh · Editor: nvim · Diff pager: delta            │
 │ Tools via mise:        mise use node@lts / python@3.12 ...        │
+│ Audit journal:         sandbox-journal (query command history)     │
 └───────────────────────────────────────────────────────────────────┘
 WELCOME
   touch /work/.sandbox-welcomed 2>/dev/null || true

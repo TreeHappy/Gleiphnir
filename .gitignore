@@ -16,6 +16,10 @@ vm/images/mac.addr
 # .ssh/
 # Keep the path in config/sandbox.env pointing outside the repo anyway
 
+# Secrets (never commit plaintext or encrypted)
+config/secrets.env
+config/secrets.env.enc
+
 # mise local cache / local overrides
 .mise/
 .mise.local.toml
