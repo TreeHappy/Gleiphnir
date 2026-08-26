@@ -1,0 +1,292 @@
+# Gleiphnir Command Reference — `fenrir` (`fen`) + `gleiphnir` (`gle`)
+
+> Two nested CLIs, one completion system ([Carapace](https://carapace.sh)).
+> - **Fenrir** (`fen`) — **in-container** sandbox CLI. Uses `gdu` for disk inspection
+>   and `yazi`/`yasi` for browsing, both installed via `container/files/mise.toml:6`.
+>   No hand-rolled `du`/`ls` — delegation to `gdu`/`yazi` is required.
+> - **Gleiphnir** (`gle`) — **host/VM** orchestration CLI. Every leaf **calls `mise run <task>`**
+>   (`mise.toml:1`), via nested `subcommands` (e.g. `gleiphnir vm start` → `mise run vm:start`).
+
+Specs live at:
+
+| CLI | Spec file | Deployed to | Alias |
+|---|---|---|---|
+| `fenrir` | `container/files/carapace/specs/fenrir.yaml` | `/etc/carapace/specs/fenrir.yaml` → `~/.config/carapace/specs/` via `container/files/mise.toml:77` `dotfiles` task | `fen` |
+| `gleiphnir` | `container/files/carapace/specs/gleiphnir.yaml` + `vm/files/carapace/specs/gleiphnir.yaml` (mirror) | `/etc/carapace/specs/gleiphnir.yaml` + `/opt/sandbox/container/files/carapace/specs/` (cloud-init) + host `~/.config/carapace/specs/` (manual `ln -s`) | `gle` |
+| `mise` | `container/files/carapace/specs/mise.yaml` | enhanced task completion | — |
+
+Shells load via `container/files/dotfiles/bashrc:23` and `container/files/dotfiles/profile.ps1:30` (`CARAPACE_SPEC_DIR=/etc/carapace/specs` + `carapace _carapace`).
+
+---
+
+## Fenrir (`fen`) — in-container
+
+Binary: `/usr/local/bin/fenrir` (`fen` → `fenrir` symlink) built from `container/files/fenrir:1`, added in `container/Containerfile:39`, templated via `vm/cloud-init/user-data.yaml.tpl:90` + `vm/scripts/template_userdata.py:24`. Also available as `/usr/local/bin/fenrir` on the VM itself.
+
+### `fenrir tools` — mise installs (via `gdu`/`yazi`)
+
+| Subcommand | Delegation | Example |
+|---|---|---|
+| `fenrir tools list` | `sandbox-tools list` or fallback `du` | `fen tools list` |
+| `fenrir tools info <tool>` | `sandbox-tools info` | `fen tools info ripgrep` |
+| `fenrir tools clean <tool>` | `sandbox-tools clean` (personal only) | `fen tools clean ripgrep` |
+| `fenrir tools clean:all` | `sandbox-tools clean:all` | `fen tools clean:all` |
+| `fenrir tools volumes [--gdu|--no-gdu]` | **`gdu`** (`/opt/mise-shared`, `$HOME`, `/work`) — interactive TUI if tty, else `gdu --non-interactive` → fallback `du -sb` | `fen tools volumes` <br> `fen tools volumes --gdu` |
+| `fenrir tools browse [path]` | **`yazi`/`yasi`** | `fen tools browse /opt/mise-shared` |
+| `fenrir volumes` | alias for `tools volumes` | `fen volumes` |
+| `fenrir browse [path]` | top-level `yazi` | `fen browse /work` |
+
+> `container/files/mise.toml:15-16` ensures `yazi = "latest"` and `gdu = "latest"` are pre-installed into the shared volume (`sandbox-mise` → `/opt/mise-shared`, warmed by `vm/guest/lib/build-container.sh:14`).
+
+### `fenrir user`
+
+| Subcommand | Description | Flags |
+|---|---|---|
+| `fenrir user add <username>` | Create sandbox user (delegates to `sandbox-user`) | `--key-file <path>`, `--key "<pubkey>"` |
+| `fenrir user remove <username>` | Remove user + home volume | — |
+| `fenrir user list` | List users | — |
+
+### `fenrir secrets` (admin)
+
+| Subcommand | Description |
+|---|---|
+| `fenrir secrets list` | Show key names |
+| `fenrir secrets set KEY=VALUE` | Add/update (or `KEY < file`) |
+| `fenrir secrets remove <key>` | Delete |
+| `fenrir secrets export` | Dump `KEY=VALUE` |
+| `fenrir secrets rotate <key>` | Random 32-char |
+
+### `fenrir sbom`
+
+| Subcommand | Flags |
+|---|---|
+| `fenrir sbom container\|tools\|vm\|all` | `--format spdx-json|cyclonedx` `--output <dir>` |
+
+### `fenrir journal`
+
+Flags-only command (no subcommands):
+
+`--last N`, `--user USER`, `--session ID`, `--grep PATTERN`, `--since 30s|5m|1h|7d`, `--failed`, `--cwd PATH`, `--json`, `--follow`
+
+```bash
+fenrir journal --last 50
+fen journal --grep git --since 1h --failed
+fen journal --json | jq .
+```
+
+### `fenrir proxy`
+
+Flags: `--listen-port <port>` `--log-dir <dir>` `--otel-endpoint <url>`
+
+```bash
+fenrir proxy --listen-port 8080 --log-dir /var/log/sandbox
+```
+
+### `fenrir firewall`
+
+| Subcommand | Alias | Description |
+|---|---|---|
+| `fenrir firewall allow <ip>` | — | Allow IP/CIDR → `tcp/22` |
+| `fenrir firewall deny <ip>` | — | Deny IP |
+| `fenrir firewall remove <ip>` | `delete, unallow, undeny` | Remove rules |
+| `fenrir firewall enforce` | `lockdown` | Drop bootstrap `any→:22` |
+| `fenrir firewall list` | `show, status` | `ufw status numbered` |
+
+---
+
+## Gleiphnir (`gle`) — host / VM orchestration (wraps `mise`)
+
+Binaries: `container/files/gleiphnir:1` + `vm/files/gleiphnir:1` (bash) and `vm/files/gleiphnir.ps1:1` (pwsh). Each leaf execs `mise run <colon-task>` (see `mise.toml:10`). Cloud-init installs to `/usr/local/bin/gleiphnir` + `/usr/local/bin/gle` (`vm/cloud-init/user-data.yaml.tpl:110`), Containerfile to `/usr/local/bin/gleiphnir` (`container/Containerfile:41`).
+
+### Top-level tasks
+
+| Gleiphnir | → `mise run` | Description |
+|---|---|---|
+| `gleiphnir deps` | `mise run deps` | Host dependency check |
+| `gleiphnir up` | `mise run up` | Full bring-up |
+| `gleiphnir down` | `mise run down` | Tear down |
+| `gleiphnir smoke` | `mise run smoke` | Smoke test |
+
+### `gleiphnir image`
+
+| Sub | → `mise` |
+|---|---|
+| `gleiphnir image download` | `image:download` |
+| `gleiphnir image info` | `image:info` |
+
+### `gleiphnir network`
+
+| Sub | → `mise` |
+|---|---|
+| `gleiphnir network up` | `network:up` |
+| `gleiphnir network down` | `network:down` |
+| `gleiphnir network status` | `network:status` |
+
+### `gleiphnir vm`
+
+| Sub | → `mise` | Notes |
+|---|---|---|
+| `prepare` | `vm:prepare` | seed ISO + disks |
+| `start` | `vm:start` | QEMU launch |
+| `stop` | `vm:stop` | graceful |
+| `kill` | `vm:kill` | force |
+| `console` | `vm:console` | serial log |
+| `ssh` | `vm:ssh` | admin SSH |
+| `ssh:wait` | `vm:ssh:wait` | poll |
+| `info` | `vm:info` | status |
+| `clean` | `vm:clean` | keep base image |
+| `clean:all` | `vm:clean:all` | all |
+
+### `gleiphnir user` / `gleiphnir fw`
+
+| Gleiphnir | → `mise` | Args |
+|---|---|---|
+| `gleiphnir user add <user> [--key-file|--key]` | `user:add` | `USER=`, `KEY=` |
+| `gleiphnir user remove <user>` | `user:remove` |  |
+| `gleiphnir user list` | `user:list` |  |
+| `gleiphnir fw allow <ip>` | `fw:allow` | `IP=` |
+| `gleiphnir fw deny <ip>` | `fw:deny` |  |
+| `gleiphnir fw remove <ip>` | `fw:remove` |  |
+| `gleiphnir fw list` | `fw:list` |  |
+| `gleiphnir fw enforce` | `fw:enforce` |  |
+
+```bash
+gleiphnir user add USER=alice KEY=~/.ssh/id_ed25519.pub
+gle user add alice --key-file ~/.ssh/id_ed25519.pub
+gleiphnir fw allow 203.0.113.42
+gle fw allow IP=203.0.113.42
+gle fw enforce && gle fw list
+```
+
+### `gleiphnir container`
+
+| Sub | → `mise` |
+|---|---|
+| `build` | `container:build` |
+| `info` | `container:info` |
+
+### `gleiphnir sbom` / `gleiphnir tools`
+
+| Gleiphnir | → `mise` |
+|---|---|
+| `sbom container` | `sbom:container` |
+| `sbom tools` | `sbom:tools` |
+| `sbom vm` | `sbom:vm` |
+| `sbom all` | `sbom:all` |
+| `tools list` | `tools:list` |
+| `tools info <tool>` | `tools:info TOOL=` |
+| `tools clean <tool>` | `tools:clean TOOL=` |
+| `tools clean:all` | `tools:clean:all` |
+| `tools volumes` | `tools:volumes` |
+
+### `gleiphnir obs` / `gleiphnir secrets`
+
+| Gleiphnir | → `mise` |
+|---|---|
+| `obs start` | `obs:start` (LGTM + agents) |
+| `obs stop` | `obs:stop` |
+| `obs status` | `obs:status` |
+| `obs open` | `obs:open` (Grafana) |
+| `obs deploy` | `obs:deploy` |
+| `obs clean` | `obs:clean` |
+| `secrets init` | `secrets:init` |
+| `secrets encrypt` | `secrets:encrypt` |
+| `secrets decrypt` | `secrets:decrypt` |
+| `secrets sync` | `secrets:sync` |
+| `secrets list` | `secrets:list` |
+| `secrets status` | `secrets:status` |
+
+---
+
+## Carapace Setup
+
+### In-container (automatic)
+
+```bash
+# Already wired via dotfiles task + bashrc/profile.ps1
+echo $CARAPACE_SPEC_DIR  # /etc/carapace/specs
+carapace --list | grep -E "fenrir|gleiphnir|mise"
+fen --help
+gle --help  # alias inside container
+```
+
+### On host (manual one-time)
+
+```bash
+# Install carapace (via mise)
+mise use carapace@latest
+
+# Link specs
+mkdir -p ~/.config/carapace/specs
+ln -sfn "$PWD/container/files/carapace/specs/fenrir.yaml" ~/.config/carapace/specs/fenrir.yaml
+ln -sfn "$PWD/vm/files/carapace/specs/gleiphnir.yaml" ~/.config/carapace/specs/gleiphnir.yaml
+ln -sfn "$PWD/container/files/carapace/specs/gleiphnir.yaml" ~/.config/carapace/specs/gleiphnir.yaml
+ln -sfn "$PWD/container/files/carapace/specs/mise.yaml" ~/.config/carapace/specs/mise.yaml
+
+# Shell init (bash)
+echo 'source <(carapace _carapace)' >> ~/.bashrc
+# Shell init (pwsh) — add to $PROFILE:
+#   carapace _carapace | Out-String | Invoke-Expression
+
+# Add gleiphnir to PATH (optional)
+sudo ln -sfn "$PWD/container/files/gleiphnir" /usr/local/bin/gleiphnir
+sudo ln -sfn /usr/local/bin/gleiphnir /usr/local/bin/gle
+gleiphnir --help
+```
+
+### Host `mise` vs `gleiphnir`
+
+`gleiphnir` is a thin alias over `mise run`. Both work:
+
+```bash
+mise run vm:start
+gleiphnir vm start     # nested subcommands, carapace-completeable
+gle vm start           # short alias
+```
+
+---
+
+## Migration from `sandbox-*`
+
+| Old | New |
+|---|---|
+| `sandbox-tools list` | `fenrir tools list` / `fen tools list` |
+| `sandbox-tools volumes` | `fenrir tools volumes` (→ `gdu`) |
+| `sandbox-user add …` | `fenrir user add …` (in-container) or `gleiphnir user add …` (host) |
+| `sandbox-firewall allow …` | `fenrir firewall allow …` or `gleiphnir fw allow …` |
+| `sandbox-journal --grep …` | `fenrir journal --grep …` |
+| `sandbox-sbom all` | `fenrir sbom all` or `gleiphnir sbom all` |
+| `sandbox-secrets list` | `fenrir secrets list` |
+| `sandbox-proxy` | `fenrir proxy` |
+| `mise run user:add …` | `gleiphnir user add …` (same underlying task) |
+| `mise run fw:allow …` | `gleiphnir fw allow …` |
+
+Old `sandbox-*` binaries remain on VM at `/usr/local/bin/sandbox-*` for compatibility but are no longer completed via Carapace; use `fen`/`gle` going forward.
+
+---
+
+## Examples
+
+```bash
+# In-container (ssh as sandbox user)
+fen tools list
+fen tools volumes              # gdu TUI
+fen browse                     # yazi at $PWD
+fen browse /opt/mise-shared    # yazi
+fen sbom all --format cyclonedx --output /work/sbom
+fen journal --last 20 --failed
+fen firewall list
+fen user list
+
+# On host (repo root)
+gle deps
+gle image download && gle vm prepare && gle vm start && gle vm:ssh:wait  # or gle up
+gle user add USER=bob KEY=~/.ssh/id_ed25519.pub
+gle fw allow 192.168.1.10 && gle fw enforce
+gle container build && gle sbom all
+gle obs start && gle obs open
+gle secrets sync && gle smoke
+gle down
+```
+
+See `docs/fenrir-gleiphnir-plan.md` for implementation plan and `docs/architecture.md` for internals.

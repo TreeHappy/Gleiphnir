@@ -10,7 +10,7 @@ See `README.md` for user-facing docs. This file is for contributors.
 
 - **cloud-init** (`vm/cloud-init/user-data.yaml.tpl` + `prepare-vm.ps1` + `template_userdata.py`):
   - Creates `admin` (sudo, provided SSH key), installs `podman`/`ufw`/`qemu-guest-agent`, formats and mounts `/dev/vdb` at `/srv/sandbox`.
-  - Drops guest scripts (`sandbox-shell`, `sandbox-user`, `sandbox-firewall`, container build helper) via `write_files`, and container sources under `/opt/sandbox/container/` (including dotfiles and the pwsh launcher).
+  - Drops guest scripts (`sandbox-shell`, `sandbox-user`, `sandbox-firewall`, container build helper) plus Fenrir/Gleiphnir CLIs (`fenrir`/`fen`, `gleiphnir`/`gle`) via `write_files`, and container sources under `/opt/sandbox/container/` (including dotfiles, `fenrir`/`gleiphnir` binaries, `gdu`/`yazi` via mise, and the pwsh launcher).
   - Applies ufw (default-deny incoming; tcp/22 open via a *bootstrap* rule so admin is never locked out), enables `sandbox-container-build.service`, builds `localhost/sandbox:latest`, warms the shared mise volume, and locks `sshd` to key-only.
 
 - **Guest scripts** (`vm/guest/`, stay bash — they run inside Ubuntu):
@@ -21,17 +21,17 @@ See `README.md` for user-facing docs. This file is for contributors.
     | `/home/dev` | named volume `gleiphnir-home-<user>` | per-user home (~/.cache, ~/.local, ~/.config persist) |
     | `/opt/mise-shared` | named volume `sandbox-mise` | **shared by all users** — mise toolchains download once |
     Rootless via `--userns keep-id` (`:rw,U` chowns volumes to the mapped user); rootful `sudo podman` fallback.
-  - `sandbox-user` — `useradd -m -s /usr/local/bin/sandbox-shell`, subuid allocation, authorized_keys, workspace dir, `loginctl enable-linger`; on remove also deletes the user's home volume.
-  - `sandbox-firewall` — wraps **ufw**: `allow <ip> → tcp/22`, `deny <ip>` (all ports), `remove`, `list`, and `enforce` (deletes the bootstrap any→:22 rule once a real allow-list exists). Rules persist natively via `ufw.service`.
-  - `sandbox-tools` — inspect and manage mise tool installs. Shows all tools (shared + personal) with versions and disk usage. Users can only delete from their personal installs (`~/.local/share/mise`); shared volume tools are protected. Subcommands: `list`, `info <tool>`, `clean <tool>`, `clean:all`, `volumes`.
-  - `sandbox-sbom` — generate Software Bill of Materials for the container image, mise toolchains, and VM apt packages. Uses `syft` when available, falls back to manifest-based SBOM generation. Outputs SPDX 2.3 or CycloneDX 1.5 JSON. Subcommands: `container`, `tools`, `vm`, `all`.
-  - `build-container.sh` — podman build + **warm-up**: pre-installs the manifest into `sandbox-mise` so no user ever waits for downloads.
+  - `sandbox-user` — `useradd -m -s /usr/local/bin/sandbox-shell`, subuid allocation, authorized_keys, workspace dir, `loginctl enable-linger`; on remove also deletes the user's home volume. Exposed via `fenrir user` (in-container) and `gleiphnir user` (host → `mise run user:*`).
+  - `sandbox-firewall` — wraps **ufw**: `allow <ip> → tcp/22`, `deny <ip>` (all ports), `remove`, `list`, and `enforce` (deletes the bootstrap any→:22 rule once a real allow-list exists). Rules persist natively via `ufw.service`. Exposed via `fenrir firewall` and `gleiphnir fw`.
+  - `sandbox-tools` — inspect and manage mise tool installs. Shows all tools (shared + personal) with versions and disk usage. Users can only delete from their personal installs (`~/.local/share/mise`); shared volume tools are protected. Subcommands: `list`, `info <tool>`, `clean <tool>`, `clean:all`, `volumes`. In-container now via `fenrir tools …` which delegates `volumes` to **`gdu`** and browsing to **`yazi`/`yasi`**.
+  - `sandbox-sbom` — generate Software Bill of Materials for the container image, mise toolchains, and VM apt packages. Uses `syft` when available, falls back to manifest-based SBOM generation. Outputs SPDX 2.3 or CycloneDX 1.5 JSON. Subcommands: `container`, `tools`, `vm`, `all`. Exposed as `fenrir sbom` and `gleiphnir sbom`.
+  - `build-container.sh` — podman build + **warm-up**: pre-installs the manifest (including `gdu` + `yazi`) into `sandbox-mise` so no user ever waits for downloads.
 
-- **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, yazi, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh.
+- **Container** (`container/`): `ubuntu:26.04` with `git`, mise binary, user `dev` (uid 1000, no sudo, login shell = `/usr/local/bin/sandbox-pwsh`). Entrypoint bootstraps mise against `/opt/mise-shared/*`, links dotfiles via the mise `dotfiles` task, then execs pwsh through `start-pwsh.sh` (bash fallback until first install). Default manifest at `/etc/sandbox/mise.toml`: node LTS, python 3.12, go, dotnet, ripgrep, fd, fzf, gh, delta, hunk, `yazi`/`yasi` + `gdu`, neovim (+AstroNvim seeded per workspace), leaf, carapace, atuin, opencode, pwsh. Binaries `/usr/local/bin/fenrir` (`fen`) and `/usr/local/bin/gleiphnir` (`gle`) are baked in (`container/Containerfile:36`).
 
 ## SBOM (Software Bill of Materials)
 
-`mise run sbom:*` tasks generate SPDX 2.3 or CycloneDX 1.5 JSON SBOMs for all project layers:
+`mise run sbom:*` / `gleiphnir sbom *` / `fenrir sbom *` tasks generate SPDX 2.3 or CycloneDX 1.5 JSON SBOMs for all project layers:
 
 | Task | Scope | What it scans |
 |---|---|---|
@@ -40,7 +40,7 @@ See `README.md` for user-facing docs. This file is for contributors.
 | `sbom:vm` | VM apt packages | `/var/lib/dpkg/status` (all installed .deb packages) |
 | `sbom:all` | All of the above | Combined output |
 
-SBOMs are generated inside the VM via `sandbox-sbom` and copied to the host `sbom/` directory. The `syft` tool (host-side) is used when available; a fallback manifest-based generator handles offline or missing-syft scenarios.
+SBOMs are generated via `fenrir sbom` (in-container) or `gleiphnir sbom` (host → `mise run`) which delegate to `sandbox-sbom` inside the VM, then copied to the host `sbom/` directory. The `syft` tool (host-side) is used when available; a fallback manifest-based generator handles offline or missing-syft scenarios.
 
 ## Dotfiles
 
@@ -59,34 +59,31 @@ Sandbox dotfiles ship from `/etc/sandbox/dotfiles/` inside the container image:
 
 ## Shell completion (Carapace)
 
-[Carapace](https://carapace.sh) provides multi-shell tab completion for all Gleiphnir commands. Custom spec files live in `container/files/carapace/specs/` and are deployed system-wide into the container at `/etc/carapace/specs/`.
+[Carapace](https://carapace.sh) provides multi-shell tab completion for all Gleiphnir commands, now **nested** under two CLIs. Custom spec files live in `container/files/carapace/specs/` (and `vm/files/carapace/specs/` for the host mirror) and are deployed system-wide into the container at `/etc/carapace/specs/` and onto the VM at `/opt/sandbox/container/files/carapace/specs/` (cloud-init).
 
-| Spec file | Command | Completions |
-|---|---|---|
-| `sandbox-user.yaml` | `sandbox-user` | `add`/`remove`/`list`, `--key-file`/`--key` flags |
-| `sandbox-firewall.yaml` | `sandbox-firewall` | `allow`/`deny`/`remove`/`enforce`/`list` with aliases |
-| `sandbox-tools.yaml` | `sandbox-tools` | `list`/`info`/`clean`/`clean:all`/`volumes`, dynamic tool names |
-| `sandbox-sbom.yaml` | `sandbox-sbom` | `container`/`tools`/`vm`/`all`, `--format`/`--output` flags |
-| `sandbox-journal.yaml` | `sandbox-journal` | All `--flags` with typed values |
-| `sandbox-secrets.yaml` | `sandbox-secrets` | `list`/`set`/`remove`/`export`/`rotate`, dynamic key names |
-| `sandbox-proxy.yaml` | `sandbox-proxy` | `--listen-port`/`--log-dir`/`--otel-endpoint` flags |
-| `mise.yaml` | `mise` | Enhanced task completion with descriptions |
+| Spec file | Command | Completions | Alias |
+|---|---|---|---|
+| `fenrir.yaml` | `fenrir` | Nested `tools {list,info,clean,clean:all,volumes,browse}`, `user {add,remove,list}`, `secrets {list,set,remove,export,rotate}`, `sbom {container,tools,vm,all}`, `journal {--flags}`, `proxy {--flags}`, `firewall {allow,deny,remove,enforce,list}`, `browse`, `volumes` — volumes→`gdu`, browse→`yazi`/`yasi` | `fen` |
+| `gleiphnir.yaml` | `gleiphnir` | Nested `vm {prepare,start,stop,kill,console,ssh,ssh:wait,info,clean,clean:all}`, `user {add,remove,list}`, `fw {allow,deny,remove,list,enforce}`, `container {build,info}`, `sbom {…}`, `tools {list,info,clean,clean:all,volumes}`, `obs {start,stop,status,open,deploy,clean}`, `secrets {init,encrypt,decrypt,sync,list,status}`, `image {download,info}`, `network {up,down,status}`, `up,down,smoke` — every leaf calls `mise run <task>` | `gle` |
+| `mise.yaml` | `mise` | Enhanced task completion with descriptions | — |
 
-Each spec declares `aliases: [gle-*]` so users can also type `gle-user`, `gle-tools`, etc. as shorthand. Specs are loaded via `CARAPACE_SPEC_DIR=/etc/carapace/specs` (set in bashrc and pwsh profile) and additionally symlinked into `~/.config/carapace/specs/` by the `dotfiles` task.
+Legacy `sandbox-*.yaml` specs have been removed in favor of nested `fenrir`/`gleiphnir`. Each declares `aliases: [fen]` / `aliases: [gle]` so `fen tools list` and `gle vm start` work. Specs are loaded via `CARAPACE_SPEC_DIR=/etc/carapace/specs` (set in `container/files/dotfiles/bashrc:23` and `profile.ps1`) and additionally symlinked into `~/.config/carapace/specs/` by the `dotfiles` task (`container/files/mise.toml:77`). See `docs/commands.md` for full reference.
 
 ## Volume tooling
 
-`sandbox-tools` (inside containers) and `mise run tools:*` (host-side) provide visibility into mise tool installs:
+`fenrir tools` (in-container, via `gdu`/`yazi`) and `gleiphnir tools` (host → `mise run tools:*`) provide visibility into mise tool installs (both delegate to `sandbox-tools`/`mise` with `gdu` now handling disk analysis):
 
-| Command | Description |
-|---|---|
-| `sandbox-tools list` | List all tools (shared + personal) with versions and disk usage |
-| `sandbox-tools info <tool>` | Detailed info: version, path, size, source (shared/personal) |
-| `sandbox-tools clean <tool>` | Remove a personal install (shared tools are protected) |
-| `sandbox-tools clean:all` | Remove all personal installs (with confirmation) |
-| `sandbox-tools volumes` | Show volume mounts, disk usage, and tool counts |
+| Command | Description | Delegation |
+|---|---|---|
+| `fenrir tools list` / `gleiphnir tools list` | List all tools (shared + personal) with versions and disk usage | `sandbox-tools list` / `mise run tools:list` |
+| `fenrir tools info <tool>` | Detailed info: version, path, size, source (shared/personal) | `gdu` for size |
+| `fenrir tools clean <tool>` | Remove a personal install (shared tools are protected) |  |
+| `fenrir tools clean:all` | Remove all personal installs (with confirmation) |  |
+| `fenrir tools volumes [--gdu]` | Show volume mounts, disk usage, and tool counts — **via `gdu`** | `gdu /opt/mise-shared`, `gdu $HOME`, `gdu /work` |
+| `fenrir browse [path]` / `fenrir tools browse` | Browse volumes | **`yazi`/`yasi`** |
+| `gleiphnir tools volumes` | Host-side volumes (proxies to VM) | `mise run tools:volumes` |
 
-Host-side convenience tasks: `mise run tools:list`, `mise run tools:info TOOL=...`, `mise run tools:clean TOOL=...`, `mise run tools:volumes`.
+Host tasks: `gleiphnir tools list` → `mise run tools:list` etc. See `docs/commands.md#fenrir-tools`.
 
 ## Networking modes
 
@@ -95,10 +92,10 @@ Host-side convenience tasks: `mise run tools:list`, `mise run tools:info TOOL=..
 
 ## Data flow
 
-1. `mise run up` → `deps.ps1` → `download-image.ps1` → `prepare-vm.ps1` (overlay + data qcow2 + templated user-data → seed.iso via cloud-localds/genisoimage/pycdlib) → network-up (Linux bridge) → `start-vm.ps1` (`qemu-system-x86_64 … -daemonize` on POSIX; `Start-Process` detached on Windows; monitor = unix socket on Linux / TCP loopback on Windows).
-2. VM boots, cloud-init applies ufw posture, mounts `/srv/sandbox`, builds the image, warms `sandbox-mise`.
-3. `mise run user:add USER=alice` → `manage-user.ps1` SSHes as admin, runs `sandbox-user add`.
-4. `ssh alice@192.168.100.10` → shell = `sandbox-shell` → `podman run` → entrypoint → **pwsh** (AstroNvim/atuin/carapace ready; `bash` still available).
+1. `gleiphnir up` (or `mise run up`) → `deps.ps1` → `download-image.ps1` → `prepare-vm.ps1` (overlay + data qcow2 + templated user-data → seed.iso via cloud-localds/genisoimage/pycdlib) → network-up (Linux bridge) → `start-vm.ps1` (`qemu-system-x86_64 … -daemonize` on POSIX; `Start-Process` detached on Windows; monitor = unix socket on Linux / TCP loopback on Windows).
+2. VM boots, cloud-init applies ufw posture, mounts `/srv/sandbox`, builds the image (baking `fenrir`/`gleiphnir` + `gdu`/`yazi`), warms `sandbox-mise`.
+3. `gleiphnir user add USER=alice` (or `mise run user:add USER=alice`) → `manage-user.ps1` SSHes as admin, runs `sandbox-user add` (also exposed as `fenrir user add` in-container).
+4. `ssh alice@192.168.100.10` → shell = `sandbox-shell` → `podman run` → entrypoint → **pwsh** (AstroNvim/atuin/`fen`+`gle` carapace ready; `bash` still available). Inside: `fen tools volumes` → `gdu`, `fen browse` → `yazi`.
 
 ## Mise layering
 

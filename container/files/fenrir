@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# fenrir — Fenrir sandbox CLI (in-container)
+# Alias: fen
+# Delegates to gdu for volume inspection and yazi (yasi) for browsing,
+# otherwise proxies to the underlying sandbox-* tools.
+# All volume/size logic uses gdu when available; falls back to du/bc.
+set -euo pipefail
+
+# Resolve alias: if invoked as `fen`, behave identical to `fenrir`
+BIN_NAME="$(basename "$0")"
+
+# ── helpers ────────────────────────────────────────────────────────────
+die() { echo "error: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+MISE_DATA_DIR="${MISE_DATA_DIR:-/opt/mise-shared/data}"
+USER_DATA_DIR="${HOME}/.local/share/mise/data"
+SHARED_INSTALLS="${MISE_DATA_DIR}/installs"
+USER_INSTALLS="${USER_DATA_DIR}/installs"
+
+usage() {
+  cat <<'USAGE'
+fenrir (fen) — Fenrir sandbox CLI (in-container)
+
+Usage:
+  fenrir tools list                        List all installed tools (shared + personal)
+  fenrir tools info <tool>                 Show details for a specific tool
+  fenrir tools clean <tool>                Remove a personal tool install
+  fenrir tools clean:all                   Remove all personal tool installs
+  fenrir tools volumes [--gdu]             Show volume mount info and disk usage (via gdu)
+  fenrir tools browse [path]               Browse tool volumes with yazi (yasi)
+  fenrir browse [path]                     Browse filesystem with yazi (yasi)
+  fenrir volumes                           Alias for `fenrir tools volumes`
+  fenrir user add <user> [--key-file|--key]  Create a sandbox user
+  fenrir user remove <user>                Remove a sandbox user
+  fenrir user list                         List sandbox users
+  fenrir secrets list|set|remove|export|rotate  Manage sandbox secrets (admin)
+  fenrir sbom container|tools|vm|all [--format] [--output]  Generate SBOM
+  fenrir journal [flags]                   Query the agent audit journal
+  fenrir proxy [--listen-port][--log-dir][--otel-endpoint]  MITM HTTP proxy
+  fenrir firewall allow|deny|remove|enforce|list  Manage VM firewall (ufw)
+  fenrir --help                            Show this help
+
+Delegation:
+  - volumes → gdu (go disk usage) when available, else du
+  - browse  → yazi (yasi) when available, else ls
+  - other tools subcommands → sandbox-tools (if present) or built-in fallback
+  - other categories → sandbox-user / sandbox-secrets / sandbox-sbom / sandbox-journal / sandbox-proxy / sandbox-firewall
+
+Aliases:
+  fen  → fenrir
+
+Examples:
+  fenrir tools list
+  fenrir tools volumes           # gdu /opt/mise-shared
+  fenrir tools volumes --gdu     # force gdu TUI
+  fenrir browse /work            # yazi
+  fenrir user list
+  fenrir sbom all --format cyclonedx
+  fenrir journal --last 50 --grep git
+USAGE
+}
+
+# ── gdu / yazi helpers ───────────────────────────────────────────────
+run_gdu() {
+  local target="${1:-/opt/mise-shared}"
+  if have gdu; then
+    # gdu: interactive TUI if tty, else summary
+    if [ -t 1 ]; then
+      exec gdu "$target"
+    else
+      gdu --non-interactive --summarize "$target" 2>/dev/null || gdu "$target" || du -sh "$target"
+    fi
+  elif have gdu-go; then
+    if [ -t 1 ]; then exec gdu-go "$target"; else du -sh "$target"; fi
+  else
+    echo "[fenrir] gdu not found — falling back to du. Install with: mise use gdu@latest" >&2
+    du -sh "$target" 2>/dev/null || du -sb "$target" 2>/dev/null | awk '{print $1 " B  " $2}'
+  fi
+}
+
+run_yazi() {
+  local target="${1:-.}"
+  if have yazi; then
+    exec yazi "$target"
+  elif have yasi; then
+    exec yasi "$target"
+  else
+    echo "[fenrir] yazi (yasi) not found — falling back to ls. Install with: mise use yazi@latest" >&2
+    ls -lah "$target"
+  fi
+}
+
+# ── fallback implementations (when sandbox-tools binary missing) ──────
+human_size() {
+  local bytes="$1"
+  if have numfmt; then
+    numfmt --to=iec-i --suffix=B "$bytes" 2>/dev/null || echo "${bytes} B"
+    return
+  fi
+  if   [ "$bytes" -ge 1073741824 ]; then printf "%.1f GB" "$(echo "scale=1; $bytes/1073741824" | bc 2>/dev/null || echo "0")"
+  elif [ "$bytes" -ge 1048576 ];    then printf "%.1f MB" "$(echo "scale=1; $bytes/1048576" | bc 2>/dev/null || echo "0")"
+  elif [ "$bytes" -ge 1024 ];       then printf "%.1f KB" "$(echo "scale=1; $bytes/1024" | bc 2>/dev/null || echo "0")"
+  else printf "%d B" "$bytes"
+  fi
+}
+dir_size_bytes() {
+  local dir="$1"
+  [ -d "$dir" ] && du -sb "$dir" 2>/dev/null | awk '{print $1}' || echo "0"
+}
+
+delegate_or_fallback() {
+  # Try to delegate to underlying sandbox-* binary; if missing, run fallback
+  local bin="$1"; shift
+  if have "$bin"; then
+    exec "$bin" "$@"
+  elif [ -x "/usr/local/bin/$bin" ]; then
+    exec "/usr/local/bin/$bin" "$@"
+  else
+    return 1
+  fi
+}
+
+# ── tools subcommands (gdu/yazi aware) ───────────────────────────────
+cmd_tools() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    list)
+      if delegate_or_fallback sandbox-tools list; then return; fi
+      # Fallback list using du
+      echo "=== Shared tools (/opt/mise-shared) ==="
+      if [ -d "$SHARED_INSTALLS" ]; then
+        for tool_dir in "$SHARED_INSTALLS"/*/; do
+          [ -d "$tool_dir" ] || continue
+          local name; name="$(basename "$tool_dir")"
+          for ver_dir in "$tool_dir"*/; do
+            [ -d "$ver_dir" ] || continue
+            local ver; ver="$(basename "$ver_dir")"
+            printf "  %-24s %-12s %s\n" "$name" "$ver" "$(human_size "$(dir_size_bytes "$ver_dir")")"
+          done
+        done
+      else
+        echo "  (no shared tools installed)"
+      fi
+      echo ""
+      echo "=== Personal tools (~/.local/share/mise) ==="
+      if [ -d "$USER_INSTALLS" ]; then
+        for tool_dir in "$USER_INSTALLS"/*/; do
+          [ -d "$tool_dir" ] || continue
+          local name; name="$(basename "$tool_dir")"
+          for ver_dir in "$tool_dir"*/; do
+            [ -d "$ver_dir" ] || continue
+            local ver; ver="$(basename "$ver_dir")"
+            printf "  %-24s %-12s %s\n" "$name" "$ver" "$(human_size "$(dir_size_bytes "$ver_dir")")"
+          done
+        done
+      else
+        echo "  (no personal tools installed)"
+      fi
+      ;;
+    info)
+      if delegate_or_fallback sandbox-tools info "$@"; then return; fi
+      local tool="${1:-}"; [ -n "$tool" ] || die "fenrir tools info requires a tool name"
+      echo "Tool: $tool"
+      [ -d "$SHARED_INSTALLS/$tool" ] && echo "  shared: $SHARED_INSTALLS/$tool" || echo "  shared: not found"
+      [ -d "$USER_INSTALLS/$tool" ] && echo "  personal: $USER_INSTALLS/$tool" || echo "  personal: not found"
+      ;;
+    clean)
+      if delegate_or_fallback sandbox-tools clean "$@"; then return; fi
+      local tool="${1:-}"; [ -n "$tool" ] || die "fenrir tools clean requires a tool name"
+      if [ -d "$USER_INSTALLS/$tool" ]; then rm -rf "$USER_INSTALLS/$tool" && echo "Removed $tool"; else echo "No personal install for $tool"; fi
+      ;;
+    clean:all)
+      if delegate_or_fallback sandbox-tools "clean:all"; then return; fi
+      [ -d "$USER_INSTALLS" ] && rm -rf "$USER_INSTALLS" && echo "Removed all personal tools" || echo "No personal tools"
+      ;;
+    volumes)
+      # Prefer gdu; handle --gdu flag
+      local use_gdu=auto
+      local gdu_target=""
+      for a in "$@"; do
+        case "$a" in --gdu) use_gdu=force ;; --no-gdu) use_gdu=none ;; *) gdu_target="$a" ;; esac
+      done
+      if [ "$use_gdu" = "force" ] && ! have gdu; then die "gdu not installed (mise use gdu@latest)"; fi
+      if [ "$use_gdu" != "none" ] && have gdu; then
+        echo "=== Volume mounts (via gdu) ==="
+        echo ""
+        echo "--- Shared tools (/opt/mise-shared) ---"
+        run_gdu "${gdu_target:-/opt/mise-shared}"
+        echo ""
+        echo "--- Home ($HOME) ---"
+        gdu --non-interactive --summarize "$HOME" 2>/dev/null || du -sh "$HOME" 2>/dev/null || true
+        echo ""
+        echo "--- Workspace (/work) ---"
+        gdu --non-interactive --summarize /work 2>/dev/null || du -sh /work 2>/dev/null || true
+      else
+        if delegate_or_fallback sandbox-tools volumes; then return; fi
+        # Fallback handled by delegate
+      fi
+      ;;
+    browse)
+      run_yazi "${1:-/opt/mise-shared}"
+      ;;
+    ""|-h|--help|help)
+      cat <<'HELP'
+fenrir tools — inspect and manage mise tool installs (via gdu/yazi)
+
+Usage:
+  fenrir tools list
+  fenrir tools info <tool>
+  fenrir tools clean <tool>
+  fenrir tools clean:all
+  fenrir tools volumes [--gdu|--no-gdu]   # gdu for disk analysis
+  fenrir tools browse [path]              # yazi (yasi) file manager
+HELP
+      ;;
+    *) die "unknown fenrir tools subcommand: $sub (see fenrir tools --help)" ;;
+  esac
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────
+# Top-level aliases
+case "${1:-}" in
+  -h|--help|help|"")
+    # If no args or help, show usage
+    if [ $# -eq 0 ]; then usage; exit 0; fi
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then usage; exit 0; fi
+    ;;
+esac
+
+# Handle top-level `volumes` alias and `browse` alias
+if [ "${1:-}" = "volumes" ]; then
+  shift
+  cmd_tools volumes "$@"
+  exit $?
+fi
+if [ "${1:-}" = "browse" ]; then
+  shift
+  run_yazi "${1:-.}"
+  exit $?
+fi
+
+CMD="${1:-}"; shift || true
+case "$CMD" in
+  tools)
+    cmd_tools "$@"
+    ;;
+  user)
+    delegate_or_fallback sandbox-user "$@" || die "sandbox-user not found (VM only: fenrir user … proxies to VM)"
+    ;;
+  secrets)
+    delegate_or_fallback sandbox-secrets "$@" || die "sandbox-secrets not found"
+    ;;
+  sbom)
+    delegate_or_fallback sandbox-sbom "$@" || die "sandbox-sbom not found"
+    ;;
+  journal)
+    delegate_or_fallback sandbox-journal "$@" || die "sandbox-journal not found"
+    ;;
+  proxy)
+    delegate_or_fallback sandbox-proxy "$@" || die "sandbox-proxy not found"
+    ;;
+  firewall)
+    delegate_or_fallback sandbox-firewall "$@" || die "sandbox-firewall not found"
+    ;;
+  -h|--help|help)
+    usage; exit 0
+    ;;
+  *)
+    echo "error: unknown fenrir command: $CMD" >&2
+    usage
+    exit 1
+    ;;
+esac

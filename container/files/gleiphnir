@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# gleiphnir (gle) — Gleiphnir host orchestration CLI (wraps mise tasks)
+# Alias: gle
+# Inside containers/VM this dispatches via SSH to host? On host it runs `mise run …`.
+# For uniformity, this script maps nested subcommands to `mise run <task>`.
+set -euo pipefail
+
+BIN_NAME="$(basename "$0")"
+
+die() { echo "error: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+usage() {
+  cat <<'USAGE'
+gleiphnir (gle) — Gleiphnir host orchestration CLI (wraps mise tasks)
+
+Usage:
+  gleiphnir deps                          Check host dependencies
+  gleiphnir image download|info           Image management
+  gleiphnir network up|down|status        Bridge/TAP networking (Linux)
+  gleiphnir vm prepare|start|stop|kill|console|ssh|ssh:wait|info|clean|clean:all
+  gleiphnir user add|remove|list [USER=...] [KEY=...]
+  gleiphnir fw allow|deny|remove|list|enforce [IP=...]
+  gleiphnir container build|info          Container image
+  gleiphnir sbom container|tools|vm|all   SBOM generation
+  gleiphnir tools list|info|clean|clean:all|volumes
+  gleiphnir obs start|stop|status|open|deploy|clean  Observability (LGTM)
+  gleiphnir secrets init|encrypt|decrypt|sync|list|status
+  gleiphnir smoke                         Smoke test
+  gleiphnir up                            Full bring-up (deps→image→prepare→start)
+  gleiphnir down                          Tear down (stop→network:down)
+  gleiphnir --help                        Show this help
+
+Mapping examples:
+  gleiphnir vm start              → mise run vm:start
+  gleiphnir user add USER=alice   → mise run user:add USER=alice
+  gleiphnir user add alice --key-file ~/.ssh/id_ed25519.pub
+  gleiphnir fw allow 203.0.113.42  → mise run fw:allow IP=203.0.113.42
+  gleiphnir tools info TOOL=ripgrep
+  gleiphnir sbom container --format cyclonedx
+
+Aliases:
+  gle → gleiphnir
+USAGE
+}
+
+# ── locate mise ───────────────────────────────────────────────────────
+MISE_BIN="$(command -v mise 2>/dev/null || echo "mise")"
+
+run_mise() {
+  local task="$1"; shift
+  if ! have mise && ! have "$MISE_BIN"; then
+    echo "[gleiphnir] mise not found on PATH. Install from https://mise.run" >&2
+    exit 1
+  fi
+  # mise run <task> [-- args...]
+  # Pass extra args via -- if they look like flags; otherwise directly.
+  if [ $# -eq 0 ]; then
+    exec "$MISE_BIN" run "$task"
+  else
+    exec "$MISE_BIN" run "$task" -- "$@"
+  fi
+}
+
+# ── argument normalizers ─────────────────────────────────────────────
+# Convert positional IP/USER/TOOL to KEY=VALUE form expected by ps1 scripts
+normalize_fw() {
+  # gleiphnir fw allow 1.2.3.4  → mise run fw:allow IP=1.2.3.4
+  # but also support IP=… already
+  local out=()
+  for a in "$@"; do
+    if [[ "$a" == IP=* ]]; then out+=("$a")
+    elif [[ "$a" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]] || [[ "$a" =~ / ]]; then out+=("IP=$a")
+    else out+=("$a")
+    fi
+  done
+  printf '%s\n' "${out[@]}"
+}
+normalize_user() {
+  # handle USER=, KEY= vs positional
+  local out=()
+  for a in "$@"; do
+    if [[ "$a" == USER=* || "$a" == KEY=* ]]; then out+=("$a")
+    elif [[ "$a" == --key-file=* ]]; then out+=("KEY=${a#--key-file=}")
+    elif [[ "$a" == --key=* ]]; then out+=("KEY=${a#--key=}")
+    elif [[ "$a" == --key-file ]]; then : # handled via next? bash wrapper simplifies
+      out+=("$a")
+    else out+=("$a")
+    fi
+  done
+  printf '%s\n' "${out[@]}"
+}
+
+# ── dispatch ──────────────────────────────────────────────────────────
+if [ $# -eq 0 ] || [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage; exit 0
+fi
+
+CMD="${1:-}"; shift || true
+case "$CMD" in
+  deps)
+    run_mise "deps" "$@"
+    ;;
+  install:deps)
+    run_mise "install:deps" "$@"
+    ;;
+  gen:key)
+    run_mise "gen:key" "$@"
+    ;;
+  image)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      download) run_mise "image:download" "$@" ;;
+      info)     run_mise "image:info" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir image download|info"; exit 0 ;;
+      *) die "unknown gleiphnir image subcommand: $SUB" ;;
+    esac
+    ;;
+  network)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      up)     run_mise "network:up" "$@" ;;
+      down)   run_mise "network:down" "$@" ;;
+      status) run_mise "network:status" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir network up|down|status"; exit 0 ;;
+      *) die "unknown gleiphnir network subcommand: $SUB" ;;
+    esac
+    ;;
+  vm)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      prepare)   run_mise "vm:prepare" "$@" ;;
+      start)     run_mise "vm:start" "$@" ;;
+      stop)      run_mise "vm:stop" "$@" ;;
+      kill)      run_mise "vm:kill" "$@" ;;
+      console)   run_mise "vm:console" "$@" ;;
+      ssh)       run_mise "vm:ssh" "$@" ;;
+      ssh:wait)  run_mise "vm:ssh:wait" "$@" ;;
+      info)      run_mise "vm:info" "$@" ;;
+      clean)     run_mise "vm:clean" "$@" ;;
+      clean:all) run_mise "vm:clean:all" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir vm prepare|start|stop|kill|console|ssh|ssh:wait|info|clean|clean:all"; exit 0 ;;
+      *) die "unknown gleiphnir vm subcommand: $SUB" ;;
+    esac
+    ;;
+  user)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      add)    # normalize USER= handling
+        mapfile -t ARGS < <(normalize_user "$@")
+        run_mise "user:add" "${ARGS[@]}"
+        ;;
+      remove)
+        mapfile -t ARGS < <(normalize_user "$@")
+        run_mise "user:remove" "${ARGS[@]}"
+        ;;
+      list)   run_mise "user:list" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir user add|remove|list [USER=...] [KEY=...]"; exit 0 ;;
+      *) die "unknown gleiphnir user subcommand: $SUB" ;;
+    esac
+    ;;
+  fw)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      allow)
+        mapfile -t ARGS < <(normalize_fw "$@")
+        run_mise "fw:allow" "${ARGS[@]}"
+        ;;
+      deny)
+        mapfile -t ARGS < <(normalize_fw "$@")
+        run_mise "fw:deny" "${ARGS[@]}"
+        ;;
+      remove|delete|unallow|undeny)
+        mapfile -t ARGS < <(normalize_fw "$@")
+        run_mise "fw:remove" "${ARGS[@]}"
+        ;;
+      list|show|status) run_mise "fw:list" "$@" ;;
+      enforce|lockdown) run_mise "fw:enforce" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir fw allow|deny|remove|list|enforce [IP=...]"; exit 0 ;;
+      *) die "unknown gleiphnir fw subcommand: $SUB" ;;
+    esac
+    ;;
+  firewall) # alias for fw
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      allow)   mapfile -t ARGS < <(normalize_fw "$@"); run_mise "fw:allow" "${ARGS[@]}" ;;
+      deny)    mapfile -t ARGS < <(normalize_fw "$@"); run_mise "fw:deny" "${ARGS[@]}" ;;
+      remove|delete|unallow|undeny) mapfile -t ARGS < <(normalize_fw "$@"); run_mise "fw:remove" "${ARGS[@]}" ;;
+      list|show|status) run_mise "fw:list" "$@" ;;
+      enforce|lockdown) run_mise "fw:enforce" "$@" ;;
+      *) die "unknown gleiphnir firewall subcommand: $SUB" ;;
+    esac
+    ;;
+  container)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      build) run_mise "container:build" "$@" ;;
+      info)  run_mise "container:info" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir container build|info"; exit 0 ;;
+      *) die "unknown gleiphnir container subcommand: $SUB" ;;
+    esac
+    ;;
+  sbom)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      container) run_mise "sbom:container" "$@" ;;
+      tools)     run_mise "sbom:tools" "$@" ;;
+      vm)        run_mise "sbom:vm" "$@" ;;
+      all)       run_mise "sbom:all" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir sbom container|tools|vm|all"; exit 0 ;;
+      *) die "unknown gleiphnir sbom subcommand: $SUB" ;;
+    esac
+    ;;
+  tools)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      list)      run_mise "tools:list" "$@" ;;
+      info)      run_mise "tools:info" "$@" ;;
+      clean)     run_mise "tools:clean" "$@" ;;
+      clean:all) run_mise "tools:clean:all" "$@" ;;
+      volumes)   run_mise "tools:volumes" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir tools list|info|clean|clean:all|volumes"; exit 0 ;;
+      *) die "unknown gleiphnir tools subcommand: $SUB" ;;
+    esac
+    ;;
+  obs)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      start)  run_mise "obs:start" "$@" ;;
+      stop)   run_mise "obs:stop" "$@" ;;
+      status) run_mise "obs:status" "$@" ;;
+      open)   run_mise "obs:open" "$@" ;;
+      deploy) run_mise "obs:deploy" "$@" ;;
+      clean)  run_mise "obs:clean" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir obs start|stop|status|open|deploy|clean"; exit 0 ;;
+      *) die "unknown gleiphnir obs subcommand: $SUB" ;;
+    esac
+    ;;
+  observability) # alias
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      start) run_mise "obs:start" "$@" ;;
+      stop)  run_mise "obs:stop" "$@" ;;
+      status) run_mise "obs:status" "$@" ;;
+      open)  run_mise "obs:open" "$@" ;;
+      deploy) run_mise "obs:deploy" "$@" ;;
+      clean) run_mise "obs:clean" "$@" ;;
+      *) die "unknown gleiphnir observability subcommand: $SUB" ;;
+    esac
+    ;;
+  secrets)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      init)    run_mise "secrets:init" "$@" ;;
+      encrypt) run_mise "secrets:encrypt" "$@" ;;
+      decrypt) run_mise "secrets:decrypt" "$@" ;;
+      sync)    run_mise "secrets:sync" "$@" ;;
+      list)    run_mise "secrets:list" "$@" ;;
+      status)  run_mise "secrets:status" "$@" ;;
+      ""|-h|--help) echo "Usage: gleiphnir secrets init|encrypt|decrypt|sync|list|status"; exit 0 ;;
+      *) die "unknown gleiphnir secrets subcommand: $SUB" ;;
+    esac
+    ;;
+  up)    run_mise "up" "$@" ;;
+  down)  run_mise "down" "$@" ;;
+  smoke) run_mise "smoke" "$@" ;;
+  # direct task passthrough for convenience
+  tasks|ls) exec "$MISE_BIN" tasks ls "$@" ;;
+  *)
+    echo "error: unknown gleiphnir command: $CMD (see gleiphnir --help)" >&2
+    usage
+    exit 1
+    ;;
+esac

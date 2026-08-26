@@ -121,6 +121,29 @@ __EDITORCONFIG_CONTENT__
     content: |
 __START_PWSH_CONTENT__
 
+  # fenrir CLI (in-container, delegates to gdu/yazi)
+  - path: /opt/sandbox/container/files/fenrir
+    permissions: '0755'
+    content: |
+__FENRIR_CONTENT__
+
+  # gleiphnir CLI (wraps mise tasks, alias gle)
+  - path: /opt/sandbox/container/files/gleiphnir
+    permissions: '0755'
+    content: |
+__GLEIPHNIR_CONTENT__
+
+  # carapace specs for fenrir (fen) and gleiphnir (gle)
+  - path: /opt/sandbox/container/files/carapace/specs/fenrir.yaml
+    permissions: '0644'
+    content: |
+__FENRIR_SPEC_CONTENT__
+
+  - path: /opt/sandbox/container/files/carapace/specs/gleiphnir.yaml
+    permissions: '0644'
+    content: |
+__GLEIPHNIR_SPEC_CONTENT__
+
   # ── observability: session logger, HTTP proxy, OTel config ─────────────
   # session-logger (PTY wrapper for keystroke capture)
   - path: /usr/local/bin/sandbox-session-logger
@@ -157,6 +180,18 @@ __SANDBOX_SBOM_CONTENT__
     permissions: '0755'
     content: |
 __SANDBOX_TOOLS_CONTENT__
+
+  # Fenrir CLI on VM (and alias fen)
+  - path: /usr/local/bin/fenrir
+    permissions: '0755'
+    content: |
+__FENRIR_CONTENT__
+
+  # Gleiphnir CLI on VM/host (and alias gle) — wraps mise tasks
+  - path: /usr/local/bin/gleiphnir
+    permissions: '0755'
+    content: |
+__GLEIPHNIR_CONTENT__
 
   # OTel Collector config (deployed by deploy-observability.ps1 at runtime)
   # Placeholder — actual config is deployed via SSH after VM boot
@@ -221,6 +256,10 @@ runcmd:
   - systemctl start sandbox-container-build.service 2>&1 | tail -50 || echo "container build (systemd) failed, will retry on next boot"
   # Fallback: if systemd condition prevented build (file exists but image missing), rebuild
   - podman image exists __CONTAINER_IMAGE__ || /usr/local/lib/sandbox/build-container.sh 2>&1 | tail -100 || true
+  # Aliases fen → fenrir, gle → gleiphnir
+  - ln -sfn /usr/local/bin/fenrir /usr/local/bin/fen
+  - ln -sfn /usr/local/bin/gleiphnir /usr/local/bin/gle
+  - ln -sfn /opt/sandbox/container/files/fenrir /usr/local/bin/container-fenrir 2>/dev/null || true
   # SSH: ensure password auth off, pubkey on
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config 2>/dev/null || true
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config 2>/dev/null || true
@@ -230,4 +269,4 @@ runcmd:
   - podman images 2>&1 | tee /var/log/sandbox-images.log || true
   - ufw status verbose 2>&1 | tee /var/log/ufw-status.log || true
 
-final_message: "Gleiphnir VM ready — SSH as __ADMIN_USER__, then: sandbox-user add <name>; tighten with sandbox-firewall allow <ip> + sandbox-firewall enforce"
+  final_message: "Gleiphnir VM ready — SSH as __ADMIN_USER__, then: fenrir user add <name> (or gleiphnir user add); tighten with fenrir firewall allow <ip> + fenrir firewall enforce"

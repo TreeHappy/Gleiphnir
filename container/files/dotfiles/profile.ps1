@@ -76,8 +76,9 @@ if ([Environment]::UserInteractive -and -not (Test-Path /work/.sandbox-welcomed)
 │ Shared tools volume:   /opt/mise-shared  (downloads once for all) │
 │ Default shell: pwsh · Editor: nvim · Diff pager: delta            │
 │ Tools via mise:        mise use node@lts / python@3.12 ...        │
-│ Inspect tools:         sandbox-tools list / info / volumes        │
-│ Audit journal:         sandbox-journal (query command history)     │
+│ Fenrir CLI:            fen tools list / fen tools volumes (gdu)   │
+│ Fenrir browse:         fen browse / fen tools browse (yazi/yasi)  │
+│ Audit journal:         fen journal (query command history)         │
 │ Personalize dotfiles:  mise run dotfiles:init (scaffold /work/dotfiles/) │
 └───────────────────────────────────────────────────────────────────┘
 '@ | Write-Host

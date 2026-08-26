@@ -122,40 +122,46 @@ mise run deps   # verifies your platform's toolchain
 ## Quickstart
 
 ```powershell
-# 1. See tasks / check deps
+# 1. See tasks / check deps  (gleiphnir wraps mise)
 mise run            # lists all tasks
-mise run deps
+gleiphnir deps      # gle → gleiphnir short alias
+# or: mise run deps
 
 # 2. Full bring-up (downloads image, prepares disks+seed ISO, starts VM, waits for SSH)
-mise run up
+gleiphnir up        # or: mise run up
 
 # 3. Watch boot if needed
-mise run vm:console   # or: mise run vm:info
+gleiphnir vm console   # or: gle vm info / mise run vm:console
 
 # 4. SSH as admin
-mise run vm:ssh
+gleiphnir vm ssh
 
 # 5. Create a sandbox user (host side, proxies to VM over SSH)
-mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
+gleiphnir user add USER=alice KEY=~/.ssh/id_ed25519.pub
+# or: mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
 
 # 6. Log in as sandbox user — you land straight in the container (pwsh):
 ssh alice@192.168.100.10           # or: ssh -p 2222 alice@<host-ip>
 
-# Inside the container:
+# Inside the container (fenrir → fen short alias, uses gdu/yazi):
 $PSVersionTable.PSEdition          # Core
+fenrir tools list                  # or: fen tools list
+fenrir tools volumes               # gdu
+fenrir browse /work                # yazi (yasi)
 nvim .                             # AstroNvim, EDITOR=nvim pre-wired
 git diff                           # paged through delta
 hunk diff                          # review-first diff viewer
 leaf README.md                     # markdown reader
 mise use node@22                   # extra tools install into shared cache
 
-# 7. Firewall (ufw inside the VM)
-mise run fw:allow IP=203.0.113.42  # let your IP reach SSH
-mise run fw:list
-mise run fw:enforce                # drop bootstrap rule → strict allow-list only
+# 7. Firewall (ufw inside the VM) — either via fenrir (in-container) or gleiphnir (host)
+fenrir firewall allow 203.0.113.42
+gleiphnir fw allow IP=203.0.113.42  # let your IP reach SSH
+gleiphnir fw list
+gleiphnir fw enforce                # drop bootstrap rule → strict allow-list only
 
 # 8. Tear down
-mise run down                      # vm:stop + network:down
+gleiphnir down                      # vm:stop + network:down
 ```
 
 ## Configuration
@@ -177,10 +183,11 @@ All tunables live in `config/sandbox.env` (loaded by mise `[env]` + `lib.ps1`). 
 The guest owns all firewalling — the host stays untouched. Provision opens tcp/22 to *any* via a bootstrap rule (never locks you out); then:
 
 ```powershell
-mise run fw:allow IP=<your-ip>    # allow-list entries
-mise run fw:enforce               # remove bootstrap → strict allow-list only
-mise run fw:deny  IP=192.0.2.77   # block an IP everywhere
-mise run fw:remove IP=...         # undo
+gleiphnir fw allow IP=<your-ip>    # or: fenrir firewall allow <your-ip>
+gleiphnir fw enforce               # remove bootstrap → strict allow-list only
+gleiphnir fw deny  IP=192.0.2.77   # block an IP everywhere
+gleiphnir fw remove IP=...         # undo
+# mise run fw:allow IP=... still works (gleiphnir wraps mise)
 ```
 
 In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP rules are meaningful only in bridge mode (Linux).
@@ -192,36 +199,55 @@ In `user` (NAT) mode every client appears as 10.0.2.x inside the VM, so per-IP r
 - **Shared tools volume** (`sandbox-mise` → `/opt/mise-shared`): warmed automatically after image build — common toolchains download **once** for all users. Extra `mise use ...` installs land there too and are instantly available to everyone.
 - **Per-user home volume** (`gleiphnir-home-<user>`): `~/.cache`, `~/.local` (atuin history!), `~/.config` persist across restarts.
 - **Dotfiles via mise**: bashrc / pwsh profile / gitconfig ship at `/etc/sandbox/dotfiles` and are linked by the `dotfiles` mise task on each start. Personal overrides: put same-named files in `/work/dotfiles/`.
-- **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi file manager, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
-- **Shell completion**: Carapace provides tab completion for all `sandbox-*` commands (with `gle-*` aliases) and enhanced mise task completions. Specs ship in the container image at `/etc/carapace/specs/`.
+- **Editor/diff stack**: nvim + AstroNvim (seeded per workspace), delta as git pager, hunk aliases (`git hdiff`/`git hshow`), leaf markdown reader, yazi/yasi file manager, gdu disk analyzer, fzf/fd/rg, carapace completions, atuin history, opencode agent, dotnet/node/python/go.
+- **Shell completion**: Carapace provides nested tab completion for **Fenrir** (`fenrir`/`fen`, in-container → `gdu`/`yazi`) and **Gleiphnir** (`gleiphnir`/`gle`, host → `mise run …`) plus enhanced mise task completions. Specs ship in the container image at `/etc/carapace/specs/` (`fenrir.yaml`, `gleiphnir.yaml`, `mise.yaml`). See `docs/commands.md`.
 - **OTel tracing**: host-side pwsh scripts emit OpenTelemetry spans via `otel-cli` (installed via mise) — visible in Grafana Tempo when observability is enabled.
 
 ## Sandbox users & workspaces
 
 - Login shell is `sandbox-shell`: spawns the podman container with the three-volume layout above (`--userns keep-id`, rootful fallback).
 - Workspace `/srv/sandbox/<user>` on the dedicated data disk; seeded README on first login.
-- Admin management:
+- Admin management (host via `gleiphnir`, or in-container via `fenrir`):
   ```powershell
-  mise run user:add USER=carol KEY=/tmp/carol.pub
-  mise run user:list
-  mise run user:remove USER=carol   # also removes her home volume
+  gleiphnir user add USER=carol KEY=/tmp/carol.pub
+  gleiphnir user list
+  gleiphnir user remove USER=carol   # also removes her home volume
+  # inside container: fenrir user add carol --key-file /tmp/carol.pub
   ```
 
-## Task reference (mise)
+## Task reference (mise) + Gleiphnir (`gle`) / Fenrir (`fen`)
+
+Host orchestration has two equivalent entrypoints: `mise run <task>` and the nested
+Carapace-completable `gleiphnir` (`gle`) which **calls `mise run`** under the hood.
+Inside containers use `fenrir` (`fen`) which delegates to `gdu`/`yazi`. See `docs/commands.md`.
 
 ```
-mise run deps             # host dependency check (per-platform hints)
-mise run gen:key          # admin SSH keypair
-mise run image:download / image:info
-mise run network:up / down / status      # Linux bridge (sudo); Windows no-op
-mise run vm:prepare / start / stop / kill
-mise run vm:console / vm:ssh / vm:ssh:wait / vm:info
-mise run vm:clean [-All]                 # via vm:clean / vm:clean:all
-mise run user:add|remove|list            # KEY=/IP= style args accepted
-mise run fw:allow|deny|remove|list|enforce
-mise run container:build / container:info
-mise run smoke                           # end-to-end checks vs running VM
-mise run up / down                       # convenience bundles
+# Host — gleiphnir (gle) wraps mise run
+gleiphnir deps             # or: mise run deps
+gleiphnir image download / image info
+gleiphnir network up / down / status
+gleiphnir vm prepare / start / stop / kill
+gleiphnir vm console / vm ssh / vm ssh:wait / vm info
+gleiphnir vm clean [-All]
+gleiphnir user add|remove|list            # gle user add USER=alice KEY=...
+gleiphnir fw allow|deny|remove|list|enforce
+gleiphnir container build / container info
+gleiphnir sbom container|tools|vm|all
+gleiphnir tools list|info|clean|clean:all|volumes
+gleiphnir obs start|stop|status|open|deploy|clean
+gleiphnir secrets init|encrypt|decrypt|sync|list|status
+gleiphnir smoke
+gleiphnir up / down
+
+# In-container — fenrir (fen) via gdu/yazi
+fenrir tools list / info / clean / clean:all / volumes (gdu) / browse (yazi)
+fenrir user add|remove|list
+fenrir secrets list|set|remove|export|rotate
+fenrir sbom container|tools|vm|all
+fenrir journal --last --grep --since --failed --json --follow
+fenrir proxy --listen-port --log-dir --otel-endpoint
+fenrir firewall allow|deny|remove|enforce|list
+fenrir browse [path]  → yazi
 ```
 
 ## Security model
@@ -235,9 +261,9 @@ mise run up / down                       # convenience bundles
 - `KVM/WHPX not available` — enable virtualization (BIOS / Virtual Machine Platform) or set `QEMU_ACCEL=tcg` (slow).
 - `Bridge conflicts` — leave `PHYS_IF=` empty; private bridge works on wifi. Bridging is Linux-only by design.
 - `Cannot build seed ISO` — install cloud-image-utils/genisoimage, or simply `pip install pycdlib` (works everywhere).
-- `Locked out of SSH after enforce?` — console in via `mise run vm:console`, then `sudo sandbox-firewall allow <ip>`.
+- `Locked out of SSH after enforce?` — console in via `gleiphnir vm console` (or `mise run vm:console`), then `sudo fenrir firewall allow <ip>` / `sudo sandbox-firewall allow <ip>`.
 - `pwsh missing inside fresh container` — first boot offline: launcher fell back to bash; once network allows, restart the shell and mise installs pwsh.
-- `VM SSH unreachable` — `mise run vm:console` / `vm:info`; check `vm/images/console.log`.
+- `VM SSH unreachable` — `gleiphnir vm console` / `gle vm info` / `mise run vm:info`; check `vm/images/console.log`.
 
 ## Repo layout
 
@@ -254,17 +280,24 @@ vm/
     manage-user.ps1 manage-firewall.ps1 container-*.ps1 smoke-test.ps1
   cloud-init/user-data.yaml.tpl     ufw posture + guest/container provisioning
   guest/bin/sandbox-shell           login shell → podman (3-volume layout)
-  guest/bin/sandbox-user            user lifecycle (incl. home-volume cleanup)
-  guest/bin/sandbox-firewall        ufw allow/deny/remove/enforce/list
+  guest/bin/sandbox-user            user lifecycle (incl. home-volume cleanup)  # also via fenrir user
+  guest/bin/sandbox-firewall        ufw allow/deny/remove/enforce/list          # also via fenrir firewall
   guest/lib/build-container.sh      podman build + shared-mise warm-up
+  files/
+    gleiphnir / gleiphnir.ps1       host CLI wrapping mise run (gle alias)
+    carapace/specs/gleiphnir.yaml   nested host completions (gleiphnir/gle)
 container/
   Containerfile                     ubuntu:26.04, pwsh launcher as login shell
   entrypoint.sh                     mise bootstrap → dotfiles → exec pwsh
-  files/mise.toml                   manifest (tools + env defaults + dotfiles task)
+  files/mise.toml                   manifest (tools + env defaults + dotfiles task) — includes gdu + yazi (yasi)
+  files/fenrir                      Fenrir in-container CLI (fen alias) → gdu/yazi
+  files/gleiphnir                   Gleiphnir host CLI mirror (gle alias) → mise run
   files/dotfiles/                   bashrc, profile.ps1, gitconfig
   files/start-pwsh.sh               stable pwsh launcher (bash → exec pwsh)
-  files/carapace/specs/             Carapace completion specs (sandbox-* + mise)
+  files/carapace/specs/             Carapace: fenrir.yaml (fen) + gleiphnir.yaml (gle) + mise.yaml (nested)
 docs/architecture.md                contributor deep-dive
+docs/commands.md                    fenrir/gleiphnir command reference (nested)
+docs/fenrir-gleiphnir-plan.md       implementation plan
 ```
 
 ## License

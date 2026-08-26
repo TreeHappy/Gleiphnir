@@ -1,0 +1,240 @@
+name: gleiphnir
+description: Gleiphnir host orchestration CLI — wraps mise tasks
+aliases: [gle]
+commands:
+  - name: deps
+    description: Check host dependencies (qemu, python/pycdlib, mise, pwsh)
+
+  - name: image
+    description: VM image management
+    subcommands:
+      - name: download
+        description: Download Ubuntu cloud image (qcow2)
+      - name: info
+        description: Show downloaded image info
+
+  - name: network
+    description: Host networking (bridge/TAP)
+    subcommands:
+      - name: up
+        description: Create bridge + TAP (Linux hosts, requires sudo)
+      - name: down
+        description: Remove bridge + TAP (Linux hosts, requires sudo)
+      - name: status
+        description: Show bridge/TAP/iptables status
+
+  - name: vm
+    description: VM lifecycle
+    subcommands:
+      - name: prepare
+        description: Build seed ISO and data disk from cloud-init templates
+      - name: start
+        description: Start the VM (creates bridge if needed on Linux, then launches QEMU)
+      - name: stop
+        description: Stop the VM gracefully (QEMU monitor quit)
+      - name: kill
+        description: Force-kill QEMU if vm:stop hangs
+      - name: console
+        description: Attach to VM serial console log (exit with Ctrl-C)
+      - name: ssh
+        description: SSH as admin (forwards to VM via bridge or hostfwd)
+      - name: ssh:wait
+        description: Wait until VM SSH is reachable (polls)
+      - name: info
+        description: Show VM status, PID, network mode, disks
+      - name: clean
+        description: Remove generated disks and seed ISO (keeps base cloud image)
+      - name: clean:all
+        description: Remove everything including base cloud image
+
+  - name: user
+    description: Sandbox user management (proxies to VM via SSH, wraps mise run user:*)
+    subcommands:
+      - name: add
+        description: Create a sandbox user: gleiphnir user add USER=alice [KEY=~/.ssh/id_ed25519.pub]
+        args:
+          - name: username
+            description: Username to create
+        flags:
+          - name: --key-file
+            description: Path to SSH public key file
+            flag: --key-file
+            args:
+              - name: path
+                type: path
+          - name: --key
+            description: SSH public key literal string
+            flag: --key
+            args:
+              - name: pubkey
+                type: string
+      - name: remove
+        description: Remove a sandbox user: gleiphnir user remove USER=alice
+        args:
+          - name: username
+            description: Username to remove
+      - name: list
+        description: List sandbox users (proxies to VM)
+
+  - name: fw
+    description: Firewall (proxies to guest ufw, wraps mise run fw:*)
+    aliases: [firewall]
+    subcommands:
+      - name: allow
+        description: Allow an IP to SSH to the VM: gleiphnir fw allow IP=1.2.3.4
+        args:
+          - name: ip
+            description: IP address or CIDR
+      - name: deny
+        description: Block an IP at the VM firewall: gleiphnir fw deny IP=1.2.3.4
+        args:
+          - name: ip
+            description: IP address or CIDR
+      - name: remove
+        description: Remove an IP from allow/deny rules: gleiphnir fw remove IP=1.2.3.4
+        aliases: [delete, unallow, undeny]
+        args:
+          - name: ip
+            description: IP address or CIDR
+      - name: list
+        description: List ufw rules in the VM
+        aliases: [show, status]
+      - name: enforce
+        description: Lock down SSH to allow-listed IPs only (removes bootstrap open rule)
+        aliases: [lockdown]
+
+  - name: container
+    description: Sandbox container image
+    subcommands:
+      - name: build
+        description: Build the sandbox container image inside the running VM
+      - name: info
+        description: Show container image info from inside the VM
+
+  - name: sbom
+    description: Software Bill of Materials
+    subcommands:
+      - name: container
+        description: Generate SBOM for the sandbox container image
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: tools
+        description: Generate SBOM for installed mise toolchains
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: vm
+        description: Generate SBOM for VM apt packages
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: all
+        description: Generate all SBOMs (container + tools + VM)
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+
+  - name: tools
+    description: Volume tools (inspect / manage mise installs, wraps mise run tools:*)
+    subcommands:
+      - name: list
+        description: List all installed mise tools (shared + personal) with disk usage
+      - name: info
+        description: Show details for a specific tool: gleiphnir tools info TOOL=ripgrep
+        args:
+          - name: tool
+            description: Tool name
+            dynamic: true
+      - name: clean
+        description: Remove a personal tool install: gleiphnir tools clean TOOL=ripgrep
+        args:
+          - name: tool
+            description: Tool name to remove
+            dynamic: true
+      - name: clean:all
+        description: Remove all personal tool installs (prompts for confirmation)
+      - name: volumes
+        description: Show volume mount info and disk usage inside the VM
+
+  - name: obs
+    description: Observability (Grafana LGTM)
+    aliases: [observability]
+    subcommands:
+      - name: start
+        description: Start LGTM container on host and deploy agents to VM
+      - name: stop
+        description: Stop LGTM container on host
+      - name: status
+        description: Show LGTM observability status
+      - name: open
+        description: Open Grafana dashboard in browser
+      - name: deploy
+        description: Deploy observability agents to running VM (after obs:start)
+      - name: clean
+        description: Remove LGTM container and data volume
+
+  - name: secrets
+    description: Secrets management
+    subcommands:
+      - name: init
+        description: Generate age keypair for secrets encryption
+      - name: encrypt
+        description: Encrypt config/secrets.env → config/secrets.env.enc (age)
+      - name: decrypt
+        description: Decrypt config/secrets.env.enc → config/secrets.env
+      - name: sync
+        description: Sync encrypted secrets to VM and decrypt there
+      - name: list
+        description: List configured secret key names on the VM
+      - name: status
+        description: Show secrets encryption and sync status
+
+  - name: up
+    description: Full bring-up — deps check, download image, prepare, start, wait for SSH, optionally start observability
+
+  - name: down
+    description: Stop VM, tear down bridge/TAP, stop observability
+
+  - name: smoke
+    description: Quick smoke test (requires running VM)

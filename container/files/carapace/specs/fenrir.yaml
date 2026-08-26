@@ -1,0 +1,270 @@
+name: fenrir
+description: Fenrir sandbox CLI — in-container tools (delegates to gdu for volumes, yazi/yasi for browsing)
+aliases: [fen]
+commands:
+  - name: tools
+    description: inspect and manage mise tool installs (via gdu, yazi)
+    subcommands:
+      - name: list
+        description: List all installed tools (shared + personal) with disk usage
+      - name: info
+        description: Show details for a specific tool
+        args:
+          - name: tool
+            description: Tool name to inspect
+            dynamic: true
+      - name: clean
+        description: Remove a personal tool install (cannot remove shared tools)
+        args:
+          - name: tool
+            description: Tool name to remove
+            dynamic: true
+      - name: clean:all
+        description: Remove all personal tool installs (prompts for confirmation)
+      - name: volumes
+        description: Show volume mount info and disk usage (via gdu)
+        flags:
+          - name: --gdu
+            description: Force gdu TUI
+            flag: --gdu
+          - name: --no-gdu
+            description: Force fallback to du
+            flag: --no-gdu
+      - name: browse
+        description: Browse tool volumes with yazi (yasi)
+        args:
+          - name: path
+            description: Path to browse
+            type: path
+
+  - name: user
+    description: manage sandbox users on the VM
+    subcommands:
+      - name: add
+        description: Create a sandbox user with SSH key access
+        args:
+          - name: username
+            description: Username to create (^[a-z_][a-z0-9_-]{0,31}$)
+        flags:
+          - name: --key-file
+            description: Path to SSH public key file
+            flag: --key-file
+            args:
+              - name: path
+                type: path
+          - name: --key
+            description: SSH public key literal string
+            flag: --key
+            args:
+              - name: pubkey
+                type: string
+      - name: remove
+        description: Remove a sandbox user and clean up resources
+        args:
+          - name: username
+            description: Username to remove
+      - name: list
+        description: List all sandbox users with home and workspace paths
+
+  - name: secrets
+    description: manage sandbox secrets (admin only)
+    subcommands:
+      - name: list
+        description: Show secret key names (not values)
+      - name: set
+        description: Add or update a secret
+        args:
+          - name: entry
+            description: "KEY=VALUE or KEY (reads value from stdin)"
+      - name: remove
+        description: Delete a secret
+        args:
+          - name: key
+            description: Secret key name to remove
+            dynamic: true
+      - name: export
+        description: Dump all secrets as KEY=VALUE (admin only)
+      - name: rotate
+        description: Generate a random 32-char value for a key
+        args:
+          - name: key
+            description: Secret key name to rotate
+            dynamic: true
+
+  - name: sbom
+    description: generate Software Bill of Materials for Gleiphnir
+    subcommands:
+      - name: container
+        description: SBOM for the sandbox container image
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: tools
+        description: SBOM for installed mise toolchains
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: vm
+        description: SBOM for VM apt packages
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+      - name: all
+        description: Generate all SBOMs (container + tools + VM)
+        flags:
+          - name: --format
+            description: Output format
+            flag: --format
+            args:
+              - name: format
+                enum: [spdx-json, cyclonedx]
+          - name: --output
+            description: Output directory
+            flag: --output
+            args:
+              - name: dir
+                type: path
+
+  - name: journal
+    description: query the agent audit journal
+    flags:
+      - name: --last
+        description: Show last N commands (default: 20)
+        flag: --last
+        args:
+          - name: n
+            type: number
+      - name: --user
+        description: Filter by user
+        flag: --user
+        args:
+          - name: user
+            type: string
+      - name: --session
+        description: Filter by session ID
+        flag: --session
+        args:
+          - name: id
+            type: string
+      - name: --grep
+        description: Search commands (regex)
+        flag: --grep
+        args:
+          - name: pattern
+            type: string
+      - name: --since
+        description: Filter by time duration
+        flag: --since
+        args:
+          - name: duration
+            enum: ["30s", "5m", "1h", "7d"]
+      - name: --failed
+        description: Only failed commands (exit_code != 0)
+        flag: --failed
+      - name: --cwd
+        description: Filter by working directory prefix
+        flag: --cwd
+        args:
+          - name: path
+            type: path
+      - name: --json
+        description: Output raw JSON (one object per line)
+        flag: --json
+      - name: --follow
+        description: Tail new entries (like tail -f)
+        flag: --follow
+
+  - name: proxy
+    description: MITM HTTP proxy for traffic observability
+    flags:
+      - name: --listen-port
+        description: Proxy listen port (default: 8080)
+        flag: --listen-port
+        args:
+          - name: port
+            type: number
+      - name: --log-dir
+        description: JSONL log directory
+        flag: --log-dir
+        args:
+          - name: dir
+            type: path
+      - name: --otel-endpoint
+        description: OTel Collector OTLP/HTTP endpoint
+        flag: --otel-endpoint
+        args:
+          - name: url
+            type: string
+
+  - name: firewall
+    description: manage VM firewall (ufw) IP allow/deny lists
+    subcommands:
+      - name: allow
+        description: Allow an IP to reach SSH (tcp/22)
+        args:
+          - name: ip
+            description: IP address or CIDR (e.g. 203.0.113.42 or 198.51.100.0/24)
+      - name: deny
+        description: Block ALL traffic from an IP/net
+        args:
+          - name: ip
+            description: IP address or CIDR to block
+      - name: remove
+        description: Remove matching allow and deny rules
+        aliases: [delete, unallow, undeny]
+        args:
+          - name: ip
+            description: IP address or CIDR to remove
+      - name: enforce
+        description: Lock down SSH — drop bootstrap "any to :22" rule
+        aliases: [lockdown]
+      - name: list
+        description: Show ufw status and numbered rules
+        aliases: [show, status]
+
+  - name: volumes
+    description: Show volume mount info and disk usage (via gdu) — alias for tools volumes
+    flags:
+      - name: --gdu
+        description: Force gdu TUI
+        flag: --gdu
+      - name: --no-gdu
+        description: Force fallback
+        flag: --no-gdu
+
+  - name: browse
+    description: Browse filesystem with yazi (yasi)
+    args:
+      - name: path
+        description: Path to browse
+        type: path
