@@ -24,6 +24,7 @@ packages:
   - curl
   - unzip
   - git
+  - jq
   - prometheus-node-exporter
   - mitmproxy
 

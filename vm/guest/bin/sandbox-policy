@@ -44,7 +44,7 @@ load_preset_domains() {
   local preset="$1"
   local preset_file="$PRESET_DIR/${preset}.txt"
   if [ -f "$preset_file" ]; then
-    cat "$preset_file"
+    grep -v '^[[:space:]]*#' "$preset_file" | grep -v '^[[:space:]]*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
   elif [ -f "$PRESET_DIR/${preset}.yaml" ]; then
     # yaml simple list extraction
     grep -E "^\s*-\s*" "$PRESET_DIR/${preset}.yaml" | sed 's/^\s*-\s*//' | tr -d '"' | tr -d "'"
@@ -178,7 +178,7 @@ sync_proxy_allowlist() {
     jq -r '.global.allow[]?' "$POLICY_FILE" 2>/dev/null >> "$tmp" || true
   fi
   # remove denied? For proxy we keep deny separate via check, but allowlist file only for allows; deny evaluated first in check
-  sort -u "$tmp" -o "$PROXY_ALLOWLIST" 2>/dev/null || true
+  LC_ALL=C sort -u "$tmp" -o "$PROXY_ALLOWLIST" 2>/dev/null || true
   rm -f "$tmp" 2>/dev/null || true
   chmod 644 "$PROXY_ALLOWLIST" 2>/dev/null || true
   # signal proxy to reload if running
@@ -260,7 +260,7 @@ cmd_ls() {
   allow_cnt="$(jq '.global.allow | length' "$POLICY_FILE" 2>/dev/null || echo 0)"
   deny_cnt="$(jq '.global.deny | length' "$POLICY_FILE" 2>/dev/null || echo 0)"
   # preset domains count
-  local preset_cnt; preset_cnt="$(load_preset_domains "$preset" | grep -v '^$' | wc -l | tr -d ' ')"
+  local preset_cnt; preset_cnt="$(load_preset_domains "$preset" | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')"
   printf "%-16s %-8s %-19s %s\n" "local-policy" "local" "all" "network: $preset_cnt preset ($preset) + $allow_cnt allow, $deny_cnt deny"
   if [ "$wide" = "1" ]; then
     echo ""
