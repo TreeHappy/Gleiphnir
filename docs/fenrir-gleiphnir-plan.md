@@ -164,9 +164,11 @@ commands:
 
 ## Progress Tracking
 
-- [ ] Task 1 — mise.toml gdu/yazi
-- [ ] Task 2 — fenrir wrapper + spec (delete sandbox-*.yaml)
-- [ ] Task 3 — gleiphnir wrapper + spec
-- [ ] Task 4 — wiring (Containerfile, entrypoint, cloud-init, dotfiles)
-- [ ] Task 5 — docs (README, architecture, commands.md)
-- [ ] Task 6 — verify
+- [x] Task 1 — mise.toml gdu/yazi — done (`container/files/mise.toml:15` `gdu="latest"`+`yazi`)
+- [x] Task 2 — fenrir wrapper + spec (delete sandbox-*.yaml) — done (`container/files/fenrir:1`, `container/files/carapace/specs/fenrir.yaml:1`, now extended with `policy`+`tools search`)
+- [x] Task 3 — gleiphnir wrapper + spec — done (`vm/files/gleiphnir:1`, `vm/files/gleiphnir.ps1:1`, `vm/files/carapace/specs/gleiphnir.yaml:1` **host-only**, `container/files/carapace/specs/gleiphnir.yaml` removed per host-owned `vm/scripts/` decision)
+- [x] Task 4 — wiring (Containerfile, entrypoint, cloud-init, dotfiles) — done (`Containerfile:39`, `entrypoint.sh`, `vm/cloud-init/user-data.yaml.tpl:33`, `vm/scripts/template_userdata.py:17`, now also policy presets)
+- [x] Task 5 — docs (README, architecture, commands.md) — done (now also `docs/policy.md`+breakouts, host-only note)
+- [x] Task 6 — verify — `mise tasks ls` shows `fenrir`/`gleiphnir` nested, `fen --help` → gdu/yazi, `gle --help` → `gle vm info` etc.
+
+**Status 2026-08-26:** This plan is **COMPLETE** (commit `58ddd73`). Follow-on egress/ingress + presets + `exa.ai` search + docs split is tracked in `docs/brain/policy-egress-plan.md` (commits `e637426`, `7dbe058`, `d410038`). Design divergence: Task 3 originally mirrored `gleiphnir.yaml` to `container/files/carapace/specs/` — now **host-only** (`vm/files/...`) per `vm/scripts/` ownership, container keeps only `fenrir.yaml`+`mise.yaml`.
