@@ -59,4 +59,4 @@ See `docs/policy/*.md` for full flags, examples (npm, pypi, github, exa.ai, per-
 
 - `docs/policy/*.md` — breakout per subcommand
 - `docs/tools-search.md` — `gle tools search` proxy-aware
-- `docs/commands.md` — full Fenrir/Gleiphnir reference (nested `policy` tree)
+- `docs/commands.md` — index + `docs/commands/gleiphnir-policy.md` + `docs/commands/fenrir-policy.md` (per-command splits)

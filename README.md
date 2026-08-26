@@ -232,7 +232,7 @@ Domains matched with `*.host` / `**`; deny wins. Proxy (`mitmproxy` `8080`) enfo
 
 Host orchestration has two equivalent entrypoints: `mise run <task>` and the nested
 Carapace-completable `gleiphnir` (`gle`) which **calls `mise run`** under the hood.
-Inside containers use `fenrir` (`fen`) which delegates to `gdu`/`yazi`. See `docs/commands.md`.
+Inside containers use `fenrir` (`fen`) which delegates to `gdu`/`yazi`. See `docs/commands.md` (index) and `docs/commands/README.md` for per-command splits.
 
 ```
 # Host — gleiphnir (gle) wraps mise run
@@ -308,7 +308,8 @@ container/
   files/start-pwsh.sh               stable pwsh launcher (bash → exec pwsh)
   files/carapace/specs/             Carapace: fenrir.yaml (fen) + mise.yaml (nested) — gleiphnir is host-only (vm/files/...)
 docs/architecture.md                contributor deep-dive
-docs/commands.md                    fenrir/gleiphnir command reference (nested)
+docs/commands.md                    fenrir/gleiphnir command reference (index, see docs/commands/README.md for splits)
+docs/commands/                      per-subcommand splits (fenrir-tools.md, gleiphnir-vm.md, etc.)
 docs/fenrir-gleiphnir-plan.md       implementation plan
 ```
 

@@ -71,7 +71,7 @@ Sandbox dotfiles ship from `/etc/sandbox/dotfiles/` inside the container image:
 | `gleiphnir.yaml` (`vm/files/...` **host-only**) | `gleiphnir` | Nested `vm {prepare,start,stop,kill,console,ssh,ssh:wait,info,clean,clean:all}`, `user {add,remove,list}`, `fw {allow,deny,remove,list,enforce}` (deprecated → `policy`), `policy {init,ls,allow,deny,rm,check,reset,preset,dump}`, `container {build,info}`, `sbom {…}`, `tools {list,info,clean,clean:all,volumes,search}`, `obs {start,stop,status,open,deploy,clean}`, `secrets {init,encrypt,decrypt,sync,list,status}`, `image {download,info}`, `network {up,down,status}`, `up,down,smoke` — every leaf calls `mise run <task>` (`vm/scripts/manage-policy.ps1` for policy) | `gle` |
 | `mise.yaml` | `mise` | Enhanced task completion with descriptions | — |
 
-Legacy `sandbox-*.yaml` specs have been removed in favor of nested `fenrir`/`gleiphnir`. `fen` stays in container, `gle` stays on host (not mirrored to `container/files/` per user request — see `docs/policy.md` host spec note). Specs are loaded via `CARAPACE_SPEC_DIR=/etc/carapace/specs` (container `bashrc:23`) and host `~/.config/carapace/specs/` via manual `ln -s $PWD/vm/files/carapace/specs/gleiphnir.yaml`. See `docs/commands.md` for full reference.
+Legacy `sandbox-*.yaml` specs have been removed in favor of nested `fenrir`/`gleiphnir`. `fen` stays in container, `gle` stays on host (not mirrored to `container/files/` per user request — see `docs/policy.md` host spec note). Specs are loaded via `CARAPACE_SPEC_DIR=/etc/carapace/specs` (container `bashrc:23`) and host `~/.config/carapace/specs/` via manual `ln -s $PWD/vm/files/carapace/specs/gleiphnir.yaml`. See `docs/commands.md` (index) and `docs/commands/README.md` for per-command splits.
 
 ## Volume tooling
 
@@ -87,7 +87,7 @@ Legacy `sandbox-*.yaml` specs have been removed in favor of nested `fenrir`/`gle
 | `fenrir browse [path]` / `fenrir tools browse` | Browse volumes | **`yazi`/`yasi`** |
 | `gleiphnir tools volumes` | Host-side volumes (proxies to VM) | `mise run tools:volumes` |
 
-Host tasks: `gleiphnir tools list` → `mise run tools:list` etc. See `docs/commands.md#fenrir-tools`.
+Host tasks: `gleiphnir tools list` → `mise run tools:list` etc. See `docs/commands/fenrir-tools.md` and `docs/commands/gleiphnir-tools.md`.
 
 ## Networking modes
 
