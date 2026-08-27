@@ -1,4 +1,4 @@
-# vm/scripts/deps.ps1 — check host dependencies per platform
+# vm/scripts/deps.ps1 — check host dependencies (Linux only)
 $ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
@@ -19,23 +19,6 @@ function script:Check-Bin([string[]]$bins) {
 
 Start-OtelSpan 'gleiphnir.deps' @{ 'script.name' = 'deps.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
 try {
-if ($IsWin) {
-    Write-Host "  Required on Windows: pwsh, git, curl, ssh, qemu-system-x86_64, qemu-img, python3 (+pycdlib)"
-    Check-Bin @('git')
-    Check-Bin @('curl.exe', 'curl')
-    Check-Bin @('ssh')
-    Check-Bin @('qemu-system-x86_64')
-    Check-Bin @('qemu-img')
-    Check-Bin @('python3', 'python')
-    Check-Bin @('mise')
-    Write-Host ""
-    Write-Host "Windows notes:"
-    Write-Host "  QEMU:       winget install SoftwareFreedomConservancy.QEMU   (then add to PATH)"
-    Write-Host "  Accel:      enable 'Virtual Machine Platform' for WHPX; set QEMU_ACCEL=tcg to force emulation"
-    Write-Host "  Networking: user-mode NAT only — Gleiphnir never modifies Windows host networking/firewall"
-    Write-Host "  Seed ISO:   pip install pycdlib  (or install mkisofs/oscdimg)"
-    Write-Host "  mise:       https://mise.jdx.dev/installing-mise.html"
-} else {
     Write-Host "  Required on Linux: pwsh, git, curl, ssh, qemu-system-x86_64, qemu-img,"
     Write-Host "                     cloud-localds OR genisoimage OR pycdlib, python3"
     Check-Bin @('git')
@@ -56,7 +39,6 @@ if ($IsWin) {
               (Get-Command mkisofs -ErrorAction SilentlyContinue))) {
         Write-Host "No native seed-ISO tool found — the pycdlib fallback will be used."
     }
-}
 
 Write-Host ""
 $pipPython = (Get-Command python3 -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
@@ -76,12 +58,8 @@ $qemuCmd = Get-Command $QEMU_BIN -ErrorAction SilentlyContinue
     Write-Host ""
     Write-Host "==> QEMU"
     & $QEMU_BIN --version | Select-Object -First 1
-    if (-not $IsWin) {
-        if (Test-Path '/dev/kvm') { Write-Host "KVM: available (/dev/kvm)" }
-        else { Write-Host "KVM: NOT available (VM will be slow TCG)" }
-    } else {
-        Write-Host "Accel: WHPX assumed (set QEMU_ACCEL=tcg to force emulation)"
-    }
+    if (Test-Path '/dev/kvm') { Write-Host "KVM: available (/dev/kvm)" }
+    else { Write-Host "KVM: NOT available (VM will be slow TCG)" }
 }
     End-OtelSpan 'OK'
 } catch {

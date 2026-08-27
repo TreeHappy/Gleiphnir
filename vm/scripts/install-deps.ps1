@@ -50,16 +50,12 @@ Ensure-MiseTool "python" "3.12"
 
 # ── System packages (via apt) ──────────────────────────────────────────────
 Write-Host "`n[2/3] System packages (apt)"
-if ($IsWin) {
-    Write-Host "  Skipping apt — on Windows. Install QEMU via winget or scoop."
-} else {
     Install-Apt @('qemu-system-x86') "QEMU emulator (qemu-system-x86_64 + qemu-img)"
     Install-Apt @('cloud-utils') "cloud-localds (seed ISO generator)"
     Install-Apt @('genisoimage') "genisoimage (fallback seed ISO generator)"
     Install-Apt @('libicu-dev') "libicu (required by PowerShell)"
     Install-Apt @('iproute2') "ip command (optional, for bridged networking)"
     Install-Apt @('iptables') "iptables (optional, for bridged networking)"
-}
 
 # ── pycdlib (Python fallback for seed ISO) ────────────────────────────────
 Write-Host "`n[3/3] Python packages"

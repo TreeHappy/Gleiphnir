@@ -48,12 +48,12 @@ run = "pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/image-info.ps
 
 # ── networking ─────────────────────────────────────────────────────────────
 [tasks.'network:up']
-description = "Create bridge + TAP (Linux hosts, requires sudo)"
-run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% else %}sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'{% endif %}"
+description = "Create bridge + TAP (Linux, requires sudo)"
+run = "sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-up.ps1'"
 
 [tasks.'network:down']
-description = "Remove bridge + TAP (Linux hosts, requires sudo)"
-run = "{% if os == 'windows' %}pwsh -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% else %}sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'{% endif %}"
+description = "Remove bridge + TAP (Linux, requires sudo)"
+run = "sudo -E {{ which('pwsh') }} -NoProfile -NoLogo -File '{{ config_root }}/vm/scripts/network-down.ps1'"
 
 [tasks.'network:status']
 description = "Show bridge/TAP/iptables status"

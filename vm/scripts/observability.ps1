@@ -50,12 +50,8 @@ function Start-Observability {
         '-p', "${otlpPort}:4317"       # OTLP gRPC
         '-p', '4318:4318'              # OTLP HTTP
         '-p', "${promPort}:9090"        # Prometheus
+        '-p', '3100:3100'               # Loki
     )
-
-    # In bridge mode, also publish the Loki port for direct queries
-    if ($env:NETWORK_MODE -ne 'user') {
-        $portArgs += '-p', '3100:3100'  # Loki
-    }
 
     Write-Host "Starting LGTM container ($CONTAINER_NAME) ..."
     & podman run -d `
@@ -119,12 +115,7 @@ function Show-AccessInfo {
     Write-Host "  OTLP gRPC: localhost:${otlpPort}"
     Write-Host "  OTLP HTTP: localhost:4318"
     Write-Host "  Prometheus: localhost:${promPort}"
-
-    if ($env:NETWORK_MODE -ne 'user') {
-        Write-Host "  VM target: $($env:VM_GATEWAY):${otlpPort} (OTLP gRPC)"
-    } else {
-        Write-Host "  VM target: 10.0.2.2:${otlpPort} (OTLP gRPC via gateway)"
-    }
+    Write-Host "  VM target: $($env:VM_GATEWAY):${otlpPort} (OTLP gRPC)"
     Write-Host ""
     Write-Host "  Data volume: $VOLUME_NAME"
     Write-Host "==================================="
@@ -156,8 +147,7 @@ switch ($action) {
         $port = if ($env:OBSERVABILITY_GRAFANA_PORT) { $env:OBSERVABILITY_GRAFANA_PORT } else { '3000' }
         $url = "http://localhost:${port}/-/dashboards"
         Write-Host "Opening $url ..."
-        if ($script:IsWin) { Start-Process $url }
-        elseif (Get-Command xdg-open -ErrorAction SilentlyContinue) { & xdg-open $url }
+        if (Get-Command xdg-open -ErrorAction SilentlyContinue) { & xdg-open $url }
         elseif (Get-Command open -ErrorAction SilentlyContinue) { & open $url }
         else { Write-Host "Open manually: $url" }
     }

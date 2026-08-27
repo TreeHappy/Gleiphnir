@@ -6,15 +6,7 @@ Start-OtelSpan 'gleiphnir.stop_vm' @{ 'script.name' = 'stop-vm.ps1'; 'service.na
 try {
 function script:Send-MonitorQuit {
     try {
-        if (Test-MonitorTcp) {
-            $client = [System.Net.Sockets.TcpClient]::new()
-            $client.Connect('127.0.0.1', [int]$QEMU_MONITOR_PORT)
-            $stream = $client.GetStream()
-            $writer = [System.IO.StreamWriter]::new($stream, [Text.Encoding]::ASCII)
-            $writer.WriteLine('quit'); $writer.Flush()
-            $writer.Close(); $client.Close()
-            return $true
-        } elseif (Test-Path -LiteralPath $MONITOR_SOCK) {
+        if (Test-Path -LiteralPath $MONITOR_SOCK) {
             $sock = [System.Net.Sockets.Socket]::new(
                 [System.Net.Sockets.AddressFamily]::Unix,
                 [System.Net.Sockets.SocketType]::Stream,
@@ -42,7 +34,7 @@ if ($pids.Count -gt 0) {
         try {
             Stop-Process -Id $procId -ErrorAction Stop
         } catch {
-            if (-not $IsWin) { & sudo kill $procId 2>$null } else { Write-Warning "could not stop pid ${procId}: $_" }
+            & sudo kill $procId 2>$null
         }
         # wait up to 10s
         for ($i = 0; $i -lt 10; $i++) {

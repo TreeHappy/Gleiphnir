@@ -13,12 +13,7 @@ if ($env:OBSERVABILITY_ENABLED -ne 'true') {
     return
 }
 
-# Determine LGTM host address for the VM
-if ($env:NETWORK_MODE -eq 'user') {
-    $lgtmHost = '10.0.2.2'
-} else {
-    $lgtmHost = $env:VM_GATEWAY
-}
+$lgtmHost = $env:VM_GATEWAY
 Write-Host "LGTM endpoint for VM: ${lgtmHost}:4317"
 
 # Install node-exporter

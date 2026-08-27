@@ -71,13 +71,9 @@ $keyArgs = @()
 if (Test-Path -LiteralPath $ADMIN_SSH_PRIV_PATH) {
     $keyArgs = @('-i', $ADMIN_SSH_PRIV_PATH)
 }
-$sshBase = @('-o', 'StrictHostKeyChecking=no', '-o', "UserKnownHostsFile=$(if ($IsWin) { 'NUL' } else { '/dev/null' })", '-o', 'LogLevel=ERROR')
+$sshBase = @('-o', 'StrictHostKeyChecking=no', '-o', "UserKnownHostsFile=/dev/null", '-o', 'LogLevel=ERROR')
 
 $target = "$($env:ADMIN_USER)@$($env:VM_IP)"
-if ($env:NETWORK_MODE -eq 'user') {
-    $target = "$($env:ADMIN_USER)@127.0.0.1"
-    $sshBase += @('-p', $HOST_SSH_FORWARD_PORT)
-}
 
 # Get the list of files to copy
 $filesCmd = "ls $vmOutputDir/*.* 2>/dev/null || true"

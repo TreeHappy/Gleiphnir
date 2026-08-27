@@ -19,11 +19,11 @@ Write-Host "  Dest: $BASE_IMAGE"
 Write-Host ""
 
 $ProgressPreference = 'SilentlyContinue'
-$curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-$wget = if (-not $IsWin) { Get-Command wget -ErrorAction SilentlyContinue } else { $null }
+$curl = Get-Command curl -ErrorAction SilentlyContinue
+$wget = Get-Command wget -ErrorAction SilentlyContinue
 
 if ($curl) {
-    & curl.exe -L --progress-bar -o $BASE_IMAGE $UBUNTU_IMAGE_URL
+    & curl -L --progress-bar -o $BASE_IMAGE $UBUNTU_IMAGE_URL
     if ($LASTEXITCODE -ne 0) { Write-Error "curl download failed ($LASTEXITCODE)" }
 } elseif ($wget) {
     & wget -O $BASE_IMAGE $UBUNTU_IMAGE_URL

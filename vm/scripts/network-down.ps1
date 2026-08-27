@@ -1,19 +1,9 @@
-# vm/scripts/network-down.ps1 — remove bridge + TAP + iptables rules (Linux hosts only)
+# vm/scripts/network-down.ps1 — remove bridge + TAP + iptables rules
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
 Start-OtelSpan 'gleiphnir.network_down' @{ 'script.name' = 'network-down.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
 try {
-if ($IsWin) {
-    Write-Host "network-down is not applicable on native Windows — nothing was created on the host."
-    exit 0
-}
-
-if ($env:NETWORK_MODE -eq 'user') {
-    Write-Host "NETWORK_MODE=user — nothing to tear down."
-    exit 0
-}
-
 $isRoot = ((& id -u) -eq '0')
 if (-not $isRoot) {
     Write-Error "network-down.ps1 must be run as root (use: mise run network:down  or  sudo pwsh vm/scripts/network-down.ps1)"

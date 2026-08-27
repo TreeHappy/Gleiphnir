@@ -5,12 +5,10 @@ $ErrorActionPreference = 'Stop'
 Start-OtelSpan 'gleiphnir.vm_info' @{ 'script.name' = 'vm-info.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
 try {
 Write-Host "=== VM info: $VM_NAME ==="
-Write-Host "Mode:          $($env:NETWORK_MODE)"
+Write-Host "Mode:          bridge"
 Write-Host "Hostname:      $($env:VM_HOSTNAME)"
 Write-Host "Resources:     $VM_CPUS vCPU / ${VM_RAM_MB}MB"
-if ($env:NETWORK_MODE -eq 'bridge') {
-    Write-Host "Bridge:        $BRIDGE_NAME ($BRIDGE_ADDR/$BRIDGE_NETMASK)  TAP: $TAP_NAME"
-}
+Write-Host "Bridge:        $BRIDGE_NAME ($BRIDGE_ADDR/$BRIDGE_NETMASK)  TAP: $TAP_NAME"
 Write-Host "VM IP:         $VM_IP/$VM_NETMASK  GW: $VM_GATEWAY  MAC: $(Get-VmMac)"
 Write-Host "Host forward:  127.0.0.1:$HOST_SSH_FORWARD_PORT → ${VM_IP}:22"
 Write-Host "Monitor:       $(Get-MonitorDescription)"
@@ -24,12 +22,9 @@ if ($pids.Count -gt 0) {
     if (Test-Path -LiteralPath $PID_FILE) { Write-Host "  PID file: $PID_FILE → $(Get-Content -LiteralPath $PID_FILE)" }
     foreach ($procId in $pids) {
         $cmdline = ''
-        if (-not $IsWin -and (Test-Path "/proc/$procId/cmdline")) {
+        if (Test-Path "/proc/$procId/cmdline") {
             $bytes = [System.IO.File]::ReadAllBytes("/proc/$procId/cmdline")
             $cmdline = [Text.Encoding]::UTF8.GetString(($bytes | ForEach-Object { if ($_ -eq 0) { 32 } else { $_ } }))
-        } elseif ($IsWin) {
-            $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-            $cmdline = "$($ci.CommandLine)"
         }
         Write-Host "  [$procId] $cmdline"
     }

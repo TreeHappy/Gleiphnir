@@ -8,7 +8,7 @@ $timeoutSecs = 600
 $interval    = 5
 $elapsed     = 0
 
-# Always use the forward port (works in both user and bridge mode)
+# Always use the forward port (DNAT fallback → VM:22)
 $forwardPort = [int]$HOST_SSH_FORWARD_PORT
 
 # Step 1: TCP check via bash (more reliable than PowerShell TcpClient in containers)

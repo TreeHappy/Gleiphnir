@@ -22,7 +22,7 @@ gle vm start                  # alias gle → gleiphnir
 | Sub | → `mise` | Notes |
 |---|---|---|
 | `prepare` | `vm:prepare` | seed ISO + disks (`vm/scripts/prepare-vm.ps1`, `template_userdata.py`) |
-| `start` | `vm:start` | QEMU `qemu-system-x86_64 … -daemonize` (POSIX) / `Start-Process` (Windows), monitor unix socket / TCP `4444` |
+| `start` | `vm:start` | QEMU `qemu-system-x86_64 … -daemonize`, monitor `unix:qemu-monitor.sock` |
 | `stop` | `vm:stop` | graceful |
 | `kill` | `vm:kill` | force |
 | `console` | `vm:console` | serial log |
