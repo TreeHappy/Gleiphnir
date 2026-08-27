@@ -2,16 +2,16 @@
 
 This directory contains per-subcommand documentation split from `docs/commands.md`.
 
-## Fenrir (`fen`) — in-container
+## Fenrir (`fen`) — in-container — yolo-safe (read-only, see `container/files/fenrir:18`)
 
-- [`fenrir-tools.md`](fenrir-tools.md) — `fenrir tools list|info|clean|volumes|browse` + `fen volumes`/`fen browse` + `tools search`
-- [`fenrir-user.md`](fenrir-user.md) — `fenrir user add|remove|list`
-- [`fenrir-secrets.md`](fenrir-secrets.md) — `fenrir secrets list|set|remove|export|rotate`
-- [`fenrir-sbom.md`](fenrir-sbom.md) — `fenrir sbom container|tools|vm|all`
-- [`fenrir-journal.md`](fenrir-journal.md) — `fenrir journal --last --grep --since --failed --json --follow`
-- [`fenrir-proxy.md`](fenrir-proxy.md) — `fenrir proxy --listen-port --log-dir --otel-endpoint`
-- [`fenrir-firewall.md`](fenrir-firewall.md) — `fenrir firewall allow|deny|remove|enforce|list|ingress|egress`
-- [`fenrir-policy.md`](fenrir-policy.md) — `fenrir policy init|ls|allow|deny|rm|check|reset|preset` (see also `docs/policy.md`)
+- [`fenrir-tools.md`](fenrir-tools.md) — `fenrir tools list|info|clean|volumes|browse` + `fen volumes`/`fen browse` + `tools search` — **allowed yolo**
+- [`fenrir-sbom.md`](fenrir-sbom.md) — `fenrir sbom container|tools` — **yolo: container/tools only, `vm|all` denied inside (use `gle sbom`)**
+- [`fenrir-journal.md`](fenrir-journal.md) — `fenrir journal --last --grep --since --failed --json --follow` — **allowed read-only yolo**
+- [`fenrir-policy.md`](fenrir-policy.md) — `fenrir policy ls|check` — **yolo read-only; `init|allow|deny|rm|reset|preset` denied inside (use `gle policy`)** (see also `docs/policy.md`)
+- [`fenrir-user.md`](fenrir-user.md) — **denied yolo** — use `gle user add|remove|list` on host (`vm/guest/bin/sandbox-user:1`)
+- [`fenrir-secrets.md`](fenrir-secrets.md) — **denied yolo** — use `gle secrets sync|list|status` on host (`vm/guest/bin/sandbox-secrets:1`, `sandbox-shell:123` injects via env)
+- [`fenrir-firewall.md`](fenrir-firewall.md) — **denied yolo** — use `gle fw` / `gle policy` on host (`vm/guest/bin/sandbox-firewall:1`, `sandbox-policy:1`)
+- [`fenrir-proxy.md`](fenrir-proxy.md) — **denied yolo** — host `gle obs` / `vm/guest/bin/sandbox-proxy:1` only
 
 ## Gleiphnir (`gle`) — host / VM
 

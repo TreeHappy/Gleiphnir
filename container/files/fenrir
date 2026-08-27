@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# fenrir — Fenrir sandbox CLI (in-container)
+# fenrir — Fenrir sandbox CLI (in-container) — YOLO-safe
 # Alias: fen
+# In-container yolo mode: only read/inspect, no host-modifying surface.
 # Delegates to gdu for volume inspection and yazi (yasi) for browsing,
-# otherwise proxies to the underlying sandbox-* tools.
+# otherwise proxies to the underlying sandbox-* tools when safe.
+# Host privileged ops (firewall, user add/remove, secrets set, policy allow/deny)
+# must use gleiphnir on host: gle policy|user|secrets|fw
 # All volume/size logic uses gdu when available; falls back to du/bc.
 set -euo pipefail
 
@@ -18,53 +21,84 @@ USER_DATA_DIR="${HOME}/.local/share/mise/data"
 SHARED_INSTALLS="${MISE_DATA_DIR}/installs"
 USER_INSTALLS="${USER_DATA_DIR}/installs"
 
+# ── yolo detection: inside podman container vs VM/host ────────────────
+# Only yolo when BOTH a container marker AND the Gleiphnir container identity
+# (dev user + /etc/sandbox/mise.toml baked). Prevents false positive on
+# host Codespaces/devcontainers which also have /.dockerenv but not Gleiphnir.
+is_container() {
+  local has_marker=0
+  [ -f /.dockerenv ] && has_marker=1
+  [ -f /run/.containerenv ] && has_marker=1
+  [ -n "${container:-}" ] && has_marker=1
+  if [ "$has_marker" = "1" ] && [ "$(id -un 2>/dev/null)" = "dev" ] && [ -f /etc/sandbox/mise.toml ]; then
+    return 0
+  fi
+  # also allow explicit opt-in for tests: FENRIR_YOLO=1
+  [ "${FENRIR_YOLO:-}" = "1" ] && return 0
+  return 1
+}
+IS_CONTAINER=0
+if is_container; then IS_CONTAINER=1; fi
+
+deny_inside() {
+  echo "error: '$*' denied inside container (yolo mode). Use gleiphnir on host:" >&2
+  echo "  gle $*   # or: mise run $*  |  ssh admin@192.168.100.10 \"sudo sandbox-${1%% *} ...\"" >&2
+  exit 1
+}
+
 usage() {
   cat <<'USAGE'
-fenrir (fen) — Fenrir sandbox CLI (in-container)
+fenrir (fen) — Fenrir sandbox CLI (in-container, yolo-safe)
 
-Usage:
+Usage (inside container — yolo, read-only):
   fenrir tools list                        List all installed tools (shared + personal)
   fenrir tools info <tool>                 Show details for a specific tool
   fenrir tools clean <tool>                Remove a personal tool install
   fenrir tools clean:all                   Remove all personal tool installs
   fenrir tools volumes [--gdu]             Show volume mount info and disk usage (via gdu)
   fenrir tools browse [path]               Browse tool volumes with yazi (yasi)
-  fenrir tools search QUERY [--source npm|pypi|crates|go|github|exa]  Proxy-aware search (npm/pypi/github/exa)
+  fenrir tools search QUERY [--source npm|pypi|crates|go|github|exa]  Proxy-aware search
   fenrir browse [path]                     Browse filesystem with yazi (yasi)
   fenrir volumes                           Alias for `fenrir tools volumes`
-  fenrir user add <user> [--key-file|--key]  Create a sandbox user
-  fenrir user remove <user>                Remove a sandbox user
-  fenrir user list                         List sandbox users
-  fenrir secrets list|set|remove|export|rotate  Manage sandbox secrets (admin)
-  fenrir sbom container|tools|vm|all [--format] [--output]  Generate SBOM
-  fenrir journal [flags]                   Query the agent audit journal
-  fenrir proxy [--listen-port][--log-dir][--otel-endpoint]  MITM HTTP proxy
-  fenrir firewall allow|deny|remove|enforce|list  Manage VM firewall (ufw) (deprecated → policy)
-  fenrir firewall ingress|egress allow|deny|remove  Egress/ingress IP rules (ufw)
-  fenrir policy init|ls|allow|deny|rm|check|reset|preset  Network policy (sbx parity, domain + IP)
+  fenrir sbom container|tools [--format] [--output]  Generate SBOM (container/tools only)
+  fenrir journal [flags]                   Query the agent audit journal (read-only)
+  fenrir policy ls [--wide] [--json] [--sandbox NAME]  List policy (read-only)
+  fenrir policy check network <host|url> [--sandbox NAME]  Test if host would be allowed
   fenrir --help                            Show this help
+
+Privileged ops denied inside (yolo): use gleiphnir on host
+  gle policy init|allow|deny|rm|reset|preset  # was fen policy allow/deny
+  gle user add|remove|list
+  gle secrets sync|list|status  # was fen secrets set/remove/export/rotate
+  gle fw ... / gle firewall  # was fen firewall
+  gle policy preset list  # etc.
 
 Delegation:
   - volumes → gdu (go disk usage) when available, else du
   - browse  → yazi (yasi) when available, else ls
   - other tools subcommands → sandbox-tools (if present) or built-in fallback
-  - other categories → sandbox-user / sandbox-secrets / sandbox-sbom / sandbox-journal / sandbox-proxy / sandbox-firewall / sandbox-policy
+  - sbom container/tools → sandbox-sbom; sbom vm/all denied inside
+  - journal → sandbox-journal (read-only)
+  - policy ls/check → sandbox-policy (read-only)
 
 Aliases:
   fen  → fenrir
 
-Examples:
+Examples (inside):
   fenrir tools list
   fenrir tools volumes           # gdu /opt/mise-shared
-  fenrir tools volumes --gdu     # force gdu TUI
   fenrir tools search "http client" --source npm
   fenrir browse /work            # yazi
-  fenrir user list
   fenrir policy ls --wide
-  fenrir policy allow network api.exa.ai
   fenrir policy check network registry.npmjs.org
-  fenrir sbom all --format cyclonedx
+  fenrir sbom container --format cyclonedx
   fenrir journal --last 50 --grep git
+
+Examples (host, privileged):
+  gle policy allow network registry.npmjs.org
+  gle user add USER=alice KEY=~/.ssh/id_ed25519.pub
+  gle secrets sync
+
 USAGE
 }
 
@@ -258,27 +292,59 @@ case "$CMD" in
     cmd_tools "$@"
     ;;
   user)
-    delegate_or_fallback sandbox-user "$@" || die "sandbox-user not found (VM only: fenrir user … proxies to VM)"
+    if [ "$IS_CONTAINER" = "1" ]; then deny_inside "user $*"; fi
+    delegate_or_fallback sandbox-user "$@" || die "sandbox-user not found (VM only: gle user …)"
     ;;
   secrets)
-    delegate_or_fallback sandbox-secrets "$@" || die "sandbox-secrets not found"
+    if [ "$IS_CONTAINER" = "1" ]; then deny_inside "secrets $*"; fi
+    delegate_or_fallback sandbox-secrets "$@" || die "sandbox-secrets not found (use gle secrets on host)"
     ;;
   sbom)
-    delegate_or_fallback sandbox-sbom "$@" || die "sandbox-sbom not found"
+    # yolo: only container|tools allowed inside
+    if [ "$IS_CONTAINER" = "1" ]; then
+      case "${1:-}" in
+        container|tools) delegate_or_fallback sandbox-sbom "$@" || die "sandbox-sbom not found" ;;
+        vm|all|"") deny_inside "sbom $* (only 'sbom container|tools' allowed inside)" ;;
+        *) die "sbom inside only: sbom container|tools (denied: sbom $*)" ;;
+      esac
+    else
+      delegate_or_fallback sandbox-sbom "$@" || die "sandbox-sbom not found"
+    fi
     ;;
   journal)
+    # read-only, allowed inside
     delegate_or_fallback sandbox-journal "$@" || die "sandbox-journal not found"
     ;;
   proxy)
-    delegate_or_fallback sandbox-proxy "$@" || die "sandbox-proxy not found"
+    if [ "$IS_CONTAINER" = "1" ]; then deny_inside "proxy $*"; fi
+    delegate_or_fallback sandbox-proxy "$@" || die "sandbox-proxy not found (host only)"
     ;;
   firewall)
-    delegate_or_fallback sandbox-firewall "$@" || die "sandbox-firewall not found"
+    if [ "$IS_CONTAINER" = "1" ]; then deny_inside "firewall $*"; fi
+    delegate_or_fallback sandbox-firewall "$@" || die "sandbox-firewall not found (use gle policy on host)"
     ;;
   policy)
-    delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
+    sub="${1:-}"
+    case "$sub" in
+      ls|list|show|status|check)
+        # read-only allowed inside
+        delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
+        ;;
+      init|allow|deny|rm|remove|delete|reset|preset|dump|"")
+        if [ "$IS_CONTAINER" = "1" ]; then deny_inside "policy $*"; fi
+        delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found (use gle policy on host)"
+        ;;
+      -h|--help|help)
+        delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
+        ;;
+      *)
+        if [ "$IS_CONTAINER" = "1" ]; then deny_inside "policy $*"; fi
+        delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
+        ;;
+    esac
     ;;
   firewall:policy) # compat
+    if [ "$IS_CONTAINER" = "1" ]; then deny_inside "policy $*"; fi
     delegate_or_fallback sandbox-policy "$@" || die "sandbox-policy not found"
     ;;
   -h|--help|help)

@@ -1,12 +1,18 @@
-# `fenrir proxy` — MITM HTTP proxy
+# `fenrir proxy` — DENIED yolo inside (host `gle obs` only)
 
-**Spec:** `container/files/carapace/specs/fenrir.yaml:222` `proxy` (`sandbox-proxy`)
-**Binary:** `container/files/fenrir:272` `sandbox-proxy`
+> **Yolo: `fen proxy` denied inside** `container/files/fenrir:272 deny_inside` — `mitmproxy 8080` `vm/guest/bin/sandbox-proxy:21` `upstream_cert=false:280` + `haproxy E req.ssl_sni -m end` `tasks/003:30` are host VM only `user-data.yaml.tpl:29 packages: mitmproxy` + `vm/guest/lib/otelcol-config.yaml:120`. Container already gets `http_proxy=http://$VM_IP:8080` `vm/guest/bin/sandbox-shell:138`.
 
-## Synopsis
+**Spec (yolo):** removed from `container/files/carapace/specs/fenrir.yaml:222`; host `gle obs` manages.
+**Binary:** `container/files/fenrir:272 deny_inside`, host `vm/guest/bin/sandbox-proxy:1`.
+
+## Synopsis (denied yolo)
 
 ```
-fenrir proxy [--listen-port <port>] [--log-dir <dir>] [--otel-endpoint <url>]
+# inside fen proxy → denied
+fen proxy --listen-port 8080  # -> error: denied inside, use gle
+
+# host VM only
+sudo sandbox-proxy --listen-port 8080 --log-dir /var/log/sandbox  # VM via gle obs
 ```
 
 ## Description
