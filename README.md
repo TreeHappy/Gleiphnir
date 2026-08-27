@@ -4,7 +4,7 @@ Open-source alternative to [Docker Sandbox](https://www.docker.com/products/dock
 
 Each developer SSHes into an Ubuntu VM and lands directly in an **ephemeral, read-only Podman container** whose default shell is **pwsh** (bash still available). The container has no `sudo`, `--cap-drop ALL`, a read-only rootfs, and mounts three volumes: the persistent workspace, a per-user persistent home, and a **shared mise volume** so toolchains download once for everyone.
 
-Host-side orchestration is pure **PowerShell (`pwsh`)** driven by **mise tasks** — identical commands work on Linux and Windows.
+Host-side orchestration is pure **PowerShell (`pwsh`)** driven by **mise tasks** on Linux (KVM + bridge).
 
 ## TL;DR
 
@@ -13,7 +13,6 @@ Host-side orchestration is pure **PowerShell (`pwsh`)** driven by **mise tasks**
 | Platform | Local dev | Server / remote access |
 |----------|-----------|----------------------|
 | **Linux** | [`docs/linux-local.md`](docs/linux-local.md) | [`docs/linux-server.md`](docs/linux-server.md) |
-| **Windows** | [`docs/windows-local.md`](docs/windows-local.md) | [`docs/windows-server.md`](docs/windows-server.md) |
 
 **Fastest start (Linux):**
 
@@ -21,15 +20,8 @@ Host-side orchestration is pure **PowerShell (`pwsh`)** driven by **mise tasks**
 curl https://mise.run | sh && mise install
 mise run up
 mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
-ssh -p 2222 alice@127.0.0.1
+ssh -p 2233 alice@127.0.0.1
 mise run down
-```
-
-**Fastest start (Windows):**
-
-```powershell
-mise run up
-ssh -p 2222 admin@127.0.0.1
 ```
 
 ## Architecture
@@ -59,7 +51,7 @@ flowchart TB
         UFW["ufw firewall"]
         style UFW fill:#f38ba8,stroke:#f38ba8,color:#1e1e2e
         
-        BRIDGE["bridge mode: TAP → br-gleiphnir<br/>DNAT :2222 → VM:22"]
+        BRIDGE["bridge mode: TAP → br-gleiphnir<br/>DNAT :2233 → VM:22"]
         style BRIDGE fill:#94e2d5,stroke:#94e2d5,color:#1e1e2e
         
         PODMAN["Podman"]
@@ -110,10 +102,9 @@ flowchart TB
 
 ## Prerequisites
 
-- **pwsh 7+** ([PowerShell](https://learn.microsoft.com/powershell/) — `snap install powershell --classic` / `winget install Microsoft.PowerShell`)
+- **pwsh 7+** ([PowerShell](https://learn.microsoft.com/powershell/) — `snap install powershell --classic`)
 - **mise** (`curl https://mise.run | sh`) — task runner; `mise install` at repo root
-- Linux hosts: `qemu-system-x86_64`, `qemu-img`, plus *one* of cloud-localds / genisoimage / `pip install pycdlib`; bridge mode additionally needs `ip`, `iptables`. See [`docs/linux-local.md`](docs/linux-local.md) for local setup or [`docs/linux-server.md`](docs/linux-server.md) for remote server mode.
-- Windows hosts: [QEMU for Windows](https://qemu.weilnetz.de/) on PATH, OpenSSH client, git, python3 (+ `pip install pycdlib`). Enable *Virtual Machine Platform* for WHPX acceleration, or set `QEMU_ACCEL=tcg`. See [`docs/windows-local.md`](docs/windows-local.md) for local setup or [`docs/windows-server.md`](docs/windows-server.md) for remote server mode.
+- Linux: `qemu-system-x86_64`, `qemu-utils`, `cloud-utils` (cloud-localds) or `genisoimage` or `pip install pycdlib`, plus `iproute2`, `iptables`. See [`docs/linux-local.md`](docs/linux-local.md) for local setup or [`docs/linux-server.md`](docs/linux-server.md) for remote server mode.
 
 ```bash
 mise run deps   # verifies your platform's toolchain
@@ -141,7 +132,7 @@ gleiphnir user add USER=alice KEY=~/.ssh/id_ed25519.pub
 # or: mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
 
 # 6. Log in as sandbox user — you land straight in the container (pwsh):
-ssh alice@192.168.100.10           # or: ssh -p 2222 alice@<host-ip>
+ssh alice@192.168.100.10           # or: ssh -p 2233 alice@<host-ip>
 
 # Inside the container (fenrir → fen short alias, uses gdu/yazi):
 $PSVersionTable.PSEdition          # Core
@@ -176,12 +167,11 @@ All tunables live in `config/sandbox.env` (loaded by mise `[env]` + `lib.ps1`). 
 
 | Variable | Default | Notes |
 |---|---|---|
-| `NETWORK_MODE` | `bridge` | `bridge` = private bridge + DNAT (**Linux only**) · `user` = QEMU NAT, zero host changes (forced on Windows) |
+| `NETWORK_MODE` | `bridge` | private bridge + DNAT (TAP `tap-gleiphnir` → `br-gleiphnir`) |
 | `PHYS_IF` | *(empty)* | Enslave a real NIC for a true LAN bridge (wired only) |
-| `HOST_SSH_FORWARD_PORT` | `2222` | Host forward to VM sshd |
+| `HOST_SSH_FORWARD_PORT` | `2233` | Host forward to VM sshd (`iptables` DNAT) |
 | `UBUNTU_RELEASE` | `resolute` | Ubuntu 26.04 LTS |
-| `QEMU_ACCEL` | `auto` | `kvm` (Linux) / `whpx` (Windows) / `tcg` |
-| `QEMU_MONITOR_PORT` | `4444` | Monitor TCP port on Windows hosts (unix socket on Linux) |
+| `QEMU_ACCEL` | `auto` | `kvm` (if `/dev/kvm` exists) / `tcg` (emulation) |
 | `VM_CPUS` / `VM_RAM_MB` | `4` / `4096` | |
 
 ## Policy (egress/ingress) + Firewall (ufw)
@@ -203,7 +193,7 @@ gleiphnir fw enforce               # remove bootstrap 22/any → strict
 ```
 
 Docs: `docs/policy.md` (global one-short, git-style) + breakout `docs/policy/*.md` per subcommand, `docs/tools-search.md` for `gle tools search`.
-Domains matched with `*.host` / `**`; deny wins. Proxy (`mitmproxy` `8080`) enforces domains; `ufw` enforces CIDR + egress default (`allow` in `open`, `deny` + `allow out 53,80,443` in `balanced/locked`). In `user` NAT mode, per-IP ingress is limited (bridge preserves IPs).
+Domains matched with `*.host` / `**`; deny wins. Proxy (`mitmproxy` `8080`) enforces domains; `ufw` enforces CIDR + egress default (`allow` in `open`, `deny` + `allow out 53,80,443` in `balanced/locked`). Bridge preserves real client IPs via DNAT so per-IP filtering works.
 
 ## Container & mise
 
@@ -265,15 +255,15 @@ fenrir browse [path]  → yazi
 
 ## Security model
 
-- **Host isolation**: QEMU VM, separate kernel. On Windows, Gleiphnir performs **no** host networking or firewall changes.
-- **Network isolation**: guest ufw default-deny incoming; only allow-listed IPs reach `sshd` after `fw:enforce`. Forward/output stay open (containers need egress/DNS).
+- **Host isolation**: QEMU VM, separate kernel (KVM).
+- **Network isolation**: bridge `br-gleiphnir` + DNAT `:2233→192.168.100.10:22` preserves source IPs; guest ufw default-deny incoming, only allow-listed IPs reach `sshd` after `fw:enforce`. Forward/output stay open (containers need egress/DNS).
 - **Container isolation**: read-only rootfs, tmpfs `/tmp`+`/run`, no-new-privileges, caps dropped, resource limits, non-root `dev`, no sudo binary.
 
 ## Troubleshooting
 
-- `KVM/WHPX not available` — enable virtualization (BIOS / Virtual Machine Platform) or set `QEMU_ACCEL=tcg` (slow).
-- `Bridge conflicts` — leave `PHYS_IF=` empty; private bridge works on wifi. Bridging is Linux-only by design.
-- `Cannot build seed ISO` — install cloud-image-utils/genisoimage, or simply `pip install pycdlib` (works everywhere).
+- `KVM not available` — enable virtualization in BIOS or set `QEMU_ACCEL=tcg` (slow emulation).
+- `Bridge conflicts` — leave `PHYS_IF=` empty; private bridge works on wifi.
+- `Cannot build seed ISO` — install cloud-image-utils/genisoimage, or `pip install pycdlib`.
 - `Locked out of SSH after enforce?` — console in via `gleiphnir vm console` (or `mise run vm:console`), then `sudo fenrir firewall allow <ip>` / `sudo sandbox-firewall allow <ip>`.
 - `pwsh missing inside fresh container` — first boot offline: launcher fell back to bash; once network allows, restart the shell and mise installs pwsh.
 - `VM SSH unreachable` — `gleiphnir vm console` / `gle vm info` / `mise run vm:info`; check `vm/images/console.log`.
@@ -284,11 +274,11 @@ fenrir browse [path]  → yazi
 mise.toml                           task runner + env loading (replaces Taskfile)
 config/sandbox.env                  tunables consumed by mise + lib.ps1
 vm/
-  scripts/                          ALL host scripting (PowerShell 7+)
-    lib.ps1                         shared config/helpers (ports of old lib.sh)
+  scripts/                          ALL host scripting (PowerShell 7+, Linux-only)
+    lib.ps1                         shared config/helpers
     deps.ps1 gen-key.ps1 download-image.ps1 image-info.ps1 clean-vm.ps1
     prepare-vm.ps1 template_userdata.py build_seed_iso.py
-    network-up/down/status.ps1      bridge+TAP+DNAT (Linux) / friendly no-op (Windows)
+    network-up/down/status.ps1      bridge+TAP+DNAT (`br-gleiphnir` + `iptables` DNAT `:2233→192.168.100.10:22`)
     start-vm.ps1 stop-vm.ps1 kill-vm.ps1 wait-ssh.ps1 …
     manage-user.ps1 manage-firewall.ps1 container-*.ps1 smoke-test.ps1
   cloud-init/user-data.yaml.tpl     ufw posture + guest/container provisioning

@@ -1,27 +1,15 @@
-# vm/scripts/network-up.ps1 — create bridge + TAP + iptables rules (Linux hosts only)
+# vm/scripts/network-up.ps1 — create bridge + TAP + iptables rules
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
 Start-OtelSpan 'gleiphnir.network_up' @{ 'script.name' = 'network-up.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
 try {
-if ($IsWin) {
-    Write-Host "network-up is not applicable on native Windows — the VM uses QEMU user-mode NAT"
-    Write-Host "(no host networking changes are made; the guest firewall handles filtering)."
-    exit 0
-}
-
-if ($env:NETWORK_MODE -eq 'user') {
-    Write-Host "NETWORK_MODE=user — no bridge/TAP needed (QEMU user-mode NAT)."
-    Write-Host "VM IP filtering inside the guest will NOT see real client IPs."
-    exit 0
-}
-
 $isRoot = ((& id -u) -eq '0')
 if (-not $isRoot) {
     Write-Error "network-up.ps1 must be run as root (use: mise run network:up  or  sudo pwsh vm/scripts/network-up.ps1)"
 }
 
-Write-Host "==> Creating bridge $BRIDGE_NAME and TAP $TAP_NAME (mode: $($env:NETWORK_MODE))"
+Write-Host "==> Creating bridge $BRIDGE_NAME and TAP $TAP_NAME (mode: bridge)"
 
 # Ensure bridge exists
 $null = & ip link show $BRIDGE_NAME 2>$null

@@ -13,15 +13,14 @@ gleiphnir network status      # show bridge/TAP/iptables status
 
 | Sub | → `mise` | Description |
 |---|---|---|
-| `up` | `network:up` | `vm/scripts/network-up.ps1` — private bridge `br-gleiphnir` 192.168.100.0/24, TAP `tap-gleiphnir`, DNAT `:2222→VM:22` (Linux only; Windows is no-op) |
+| `up` | `network:up` | `vm/scripts/network-up.ps1` — private bridge `br-gleiphnir` 192.168.100.0/24, TAP `tap-gleiphnir`, DNAT `:2233→VM:22` |
 | `down` | `network:down` | `vm/scripts/network-down.ps1` |
 | `status` | `network:status` | `vm/scripts/network-status.ps1` |
 
 ## Notes
 
-- `bridge` mode (default Linux) preserves source IPs so `ufw` inside VM can filter.
-- `user` mode (default Windows, QEMU `-netdev user,hostfwd=tcp::2222-:22`) requires zero host changes; per-IP filtering is meaningless.
-- `PHYS_IF=` enlaves a real NIC for true LAN bridge.
+- `bridge` mode preserves source IPs so `ufw` inside VM can filter.
+- `PHYS_IF=` enslaves a real NIC for true LAN bridge.
 
 ## Execution
 

@@ -4,28 +4,8 @@ $ErrorActionPreference = 'Stop'
 
 Start-OtelSpan 'gleiphnir.network_status' @{ 'script.name' = 'network-status.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
 try {
-if ($IsWin) {
-    Write-Host "=== Network mode: $($env:NETWORK_MODE) ==="
-    Write-Host ""
-    if ($env:NETWORK_MODE -eq 'user') {
-        Write-Host "QEMU user-mode NAT: host 127.0.0.1:$HOST_SSH_FORWARD_PORT → VM :22"
-        Write-Host "Native Windows: no host networking changes are made by Gleiphnir."
-        Write-Host "The guest firewall (ufw inside the VM) does all filtering."
-    } else {
-        Write-Warning "NETWORK_MODE=bridge cannot run on native Windows; start-vm forces user mode here."
-    }
-    exit 0
-}
-
-Write-Host "=== Network mode: $($env:NETWORK_MODE) ==="
+Write-Host "=== Network mode: bridge ==="
 Write-Host ""
-if ($env:NETWORK_MODE -eq 'user') {
-    Write-Host "QEMU user-mode NAT: host 127.0.0.1:$HOST_SSH_FORWARD_PORT → VM :22"
-    Write-Host "No bridge/TAP. VM cannot see real client IPs — filter inside the guest with ufw,"
-    Write-Host "or apply host-side nftables/iptables yourself."
-    exit 0
-}
-
 Write-Host "Bridge: $BRIDGE_NAME  TAP: $TAP_NAME  VM: $VM_IP/24  Host forward: :$HOST_SSH_FORWARD_PORT → ${VM_IP}:22"
 Write-Host ""
 

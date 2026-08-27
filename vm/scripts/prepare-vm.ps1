@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
-Write-Host "==> Preparing VM (mode: $($env:NETWORK_MODE))"
+Write-Host "==> Preparing VM (mode: bridge)"
 
 Require-BaseImage
 Start-OtelSpan 'gleiphnir.prepare_vm' @{ 'script.name' = 'prepare-vm.ps1'; 'service.name' = $env:OTEL_SERVICE_NAME }
@@ -10,10 +10,8 @@ try {
 if (-not (Test-Path -LiteralPath $IMAGES_DIR)) { New-Item -ItemType Directory -Path $IMAGES_DIR -Force | Out-Null }
 
 # ── detect TUN availability for bridge mode ────────────────────────────────
-if ($env:NETWORK_MODE -eq 'bridge' -and -not $IsWin -and -not (Test-Path '/dev/net/tun')) {
-    Write-Warning "/dev/net/tun not available — bridge mode requires TAP support."
-    Write-Warning "Switching to user-mode NAT for this run."
-    $env:NETWORK_MODE = 'user'
+if (-not (Test-Path '/dev/net/tun')) {
+    Write-Error "/dev/net/tun not available — bridge mode requires TAP support."
 }
 
 # ── admin SSH key ──────────────────────────────────────────────────────────
@@ -69,12 +67,7 @@ try {
         $tmp $RepoRoot $ADMIN_SSH_KEY_PATH $env:ADMIN_USER $env:VM_HOSTNAME $CONTAINER_IMAGE
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # network-config depends on NETWORK_MODE
-    if ($env:NETWORK_MODE -eq 'user') {
-        $netSrc = Join-Path $cloudInitDir 'network-config.user.yaml'
-    } else {
-        $netSrc = Join-Path $cloudInitDir 'network-config.bridge.yaml'
-    }
+    $netSrc = Join-Path $cloudInitDir 'network-config.bridge.yaml'
     if (Test-Path -LiteralPath $netSrc) {
         $netText = Get-Content -LiteralPath $netSrc -Raw
         $netText = $netText.Replace('__VM_IP__', $VM_IP)
@@ -106,7 +99,7 @@ ethernets:
     Write-Host "--- network-config ---"
     Get-Content -LiteralPath (Join-Path $tmp 'network-config')
 
-    # ── build seed ISO: cloud-localds → genisoimage/mkisofs → oscdimg → pycdlib ──
+    # ── build seed ISO: cloud-localds → genisoimage/mkisofs → pycdlib ──
     $userData = Join-Path $tmp 'user-data'
     $metaData = Join-Path $tmp 'meta-data'
     $netConf  = Join-Path $tmp 'network-config'
@@ -127,24 +120,14 @@ ethernets:
         if ($built) { break }
     }
 
-    if (-not $built -and $IsWin) {
-        $oscdimg = Get-Command oscdimg -ErrorAction SilentlyContinue
-        if ($oscdimg) {
-            Write-Host "Building seed ISO with oscdimg ..."
-            & $oscdimg.Source "-m" "-o" "-j1" $tmp $SEED_ISO 2>&1 | Select-Object -Last 10
-            $built = ($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $SEED_ISO)
-        }
-    }
-
     if (-not $built) {
         Write-Host "No native ISO tool found — trying pycdlib (pip install pycdlib) ..."
         & $python.Source -c "import pycdlib" 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Error @"
 Cannot build seed ISO. Install one of:
-  Ubuntu: sudo apt-get install cloud-image-utils      (cloud-localds)
-          or: pip3 install pycdlib                    (cross-platform)
-  Windows: pip install pycdlib                        (recommended)
+  sudo apt-get install cloud-image-utils      (cloud-localds)
+          or: pip3 install pycdlib
 "@
         }
         & $python.Source (Join-Path $PSScriptRoot 'build_seed_iso.py') $SEED_ISO $userData $metaData $netConf

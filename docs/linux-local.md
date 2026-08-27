@@ -35,7 +35,7 @@ On first run, `sudo` is needed for bridge/TAP creation (`network:up`).
 ## Connect (from same machine)
 
 ```bash
-ssh -p 2222 admin@127.0.0.1        # via iptables DNAT
+ssh -p 2233 admin@127.0.0.1        # via iptables DNAT
 ssh admin@192.168.100.10            # direct via bridge (preserves real source IP)
 ```
 
@@ -43,7 +43,7 @@ ssh admin@192.168.100.10            # direct via bridge (preserves real source I
 
 ```bash
 mise run user:add USER=alice KEY=~/.ssh/id_ed25519.pub
-ssh -p 2222 alice@127.0.0.1    # pwsh sandbox
+ssh -p 2233 alice@127.0.0.1    # pwsh sandbox
 ssh alice@192.168.100.10        # same, via bridge
 ```
 
@@ -77,4 +77,4 @@ mise run down    # stops VM, removes bridge+TAP, stops observability
 | `/dev/kvm` missing | Enable VT-x/AMD-V in BIOS, or set `QEMU_ACCEL=tcg` |
 | Bridge fails | `sudo` required; check `/dev/net/tun` exists |
 | SSH refused | `mise run vm:console` to watch boot |
-| DNAT not working | `sudo iptables -t nat -L -n \| grep 2222` |
+| DNAT not working | `sudo iptables -t nat -L -n \| grep 2233` |

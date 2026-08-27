@@ -31,7 +31,7 @@ Remove `container/files/gleiphnir` duplicate and make `vm/files/carapace/specs/g
 - `carapace --run ... policy ls --help`, `user add --help`, `sbom container --help` — all resolve.
 
 ## Remaining / Next Steps
-- Optionally remove `vm/files/gleiphnir` + `.ps1` entirely and rely solely on shim (current keeps them for Windows/backwards compat).
+- Optionally remove `vm/files/gleiphnir` + `.ps1` entirely and rely solely on shim (current keeps them for backwards compat).
 - Update `vm/scripts/manage-*.ps1` to also read `C_FLAG_*` env as fallback (currently shim script handles conversion; ps1 could also handle it for direct `mise run` without shim).
 - Ensure `~/.config/carapace/bin` is on `PATH` in `docs/commands.md` host setup.
 - Monitor `carapace --list | grep gleiphnir` after `carapace _carapace` to confirm shim creation.

@@ -72,10 +72,7 @@ flowchart TB
     OTEL_COL -->|"OTLP :4317"| OTLP_RECV
 ```
 
-The LGTM container runs as a **standalone Podman container on the host**, not inside the Gleiphnir VM. The VM ships telemetry to it over the network:
-
-- **Bridge mode**: VM reaches LGTM at `192.168.100.1:4317` (host gateway)
-- **User-mode NAT**: VM reaches LGTM at `10.0.2.2:4317` (QEMU gateway)
+The LGTM container runs as a **standalone Podman container on the host**, not inside the Gleiphnir VM. The VM ships telemetry to it over the network via `192.168.100.1:4317` (host gateway on `br-gleiphnir`).
 
 ## Quick Start
 

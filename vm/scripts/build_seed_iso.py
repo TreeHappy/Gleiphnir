@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build a NoCloud seed ISO (volid 'cidata') using pycdlib.
 
-Cross-platform fallback used when cloud-localds/genisoimage/mkisofs/oscdimg
-are unavailable (e.g. native Windows hosts).
+Fallback used when cloud-localds/genisoimage/mkisofs are unavailable.
 
 Usage:
   build_seed_iso.py OUTPUT USER_DATA META_DATA [NETWORK_CONFIG]

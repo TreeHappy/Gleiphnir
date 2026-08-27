@@ -45,8 +45,7 @@ Set-Default 'VM_DISK_SIZE'          '20G'
 Set-Default 'DATA_DISK_SIZE'        '20G'
 Set-Default 'QEMU_EXTRA_ARGS'       ''
 Set-Default 'QEMU_BIN'              'qemu-system-x86_64'
-Set-Default 'QEMU_ACCEL'            'auto'      # auto|kvm|whpx|tcg
-Set-Default 'QEMU_MONITOR_PORT'     '4444'      # TCP monitor on Windows hosts
+Set-Default 'QEMU_ACCEL'            'auto'      # auto|kvm|tcg
 Set-Default 'NETWORK_MODE'          'bridge'
 Set-Default 'BRIDGE_NAME'           'br-gleiphnir'
 Set-Default 'TAP_NAME'              'tap-gleiphnir'
@@ -58,7 +57,7 @@ Set-Default 'VM_NETMASK'            '24'
 Set-Default 'VM_GATEWAY'            '192.168.100.1'
 Set-Default 'VM_MAC'                ''
 Set-Default 'PHYS_IF'               ''
-Set-Default 'HOST_SSH_FORWARD_PORT' '2222'
+Set-Default 'HOST_SSH_FORWARD_PORT' '2233'
 Set-Default 'ADMIN_USER'            'admin'
 Set-Default 'ADMIN_SSH_KEY_PATH'    '~/.ssh/gleiphnir_admin.pub'
 Set-Default 'ADMIN_SSH_PRIV_PATH'   '~/.ssh/gleiphnir_admin'
@@ -82,8 +81,6 @@ Set-Default 'OTEL_SERVICE_NAME'                  'gleiphnir-host'
 if ([string]::IsNullOrEmpty($env:OTEL_EXPORTER_OTLP_ENDPOINT) -and $env:OBSERVABILITY_ENABLED -eq 'true') {
     $env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:$($env:OBSERVABILITY_OTLP_PORT)"
 }
-
-$script:IsWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 
 # ── path helpers ───────────────────────────────────────────────────────────
 function script:Expand-RepoPath([string]$p) {
@@ -118,7 +115,7 @@ $env:MONITOR_SOCK = Join-Path $env:IMAGES_DIR 'qemu-monitor.sock'
 # Convenience variables (same names as the old bash lib)
 foreach ($_v in @('VM_NAME','VM_HOSTNAME','UBUNTU_RELEASE','UBUNTU_VERSION','UBUNTU_ARCH','UBUNTU_IMAGE_URL',
                   'VM_CPUS','VM_RAM_MB','VM_DISK_SIZE','DATA_DISK_SIZE','QEMU_EXTRA_ARGS','QEMU_BIN','QEMU_ACCEL',
-                  'QEMU_MONITOR_PORT','NETWORK_MODE','BRIDGE_NAME','TAP_NAME','BRIDGE_ADDR','BRIDGE_NETMASK',
+                  'NETWORK_MODE','BRIDGE_NAME','TAP_NAME','BRIDGE_ADDR','BRIDGE_NETMASK',
                   'BRIDGE_NETWORK','VM_IP','VM_NETMASK','VM_GATEWAY','VM_MAC','PHYS_IF','HOST_SSH_FORWARD_PORT',
                   'ADMIN_USER','IMAGES_DIR','SEED_ISO','SYSTEM_DISK','DATA_DISK','CONTAINER_IMAGE',
                   'BASE_IMAGE','PID_FILE','CONSOLE_LOG','MAC_FILE','MONITOR_SOCK','ADMIN_SSH_KEY_PATH','ADMIN_SSH_PRIV_PATH')) {
@@ -127,12 +124,10 @@ foreach ($_v in @('VM_NAME','VM_HOSTNAME','UBUNTU_RELEASE','UBUNTU_VERSION','UBU
 Remove-Variable -Name _v -ErrorAction SilentlyContinue
 
 # ── small helpers ──────────────────────────────────────────────────────────
-function script:Get-NullDevice { if ($script:IsWin) { 'NUL' } else { '/dev/null' } }
-
-function script:Test-MonitorTcp { $script:IsWin }
+function script:Get-NullDevice { '/dev/null' }
 
 function script:Get-MonitorDescription {
-    if (Test-MonitorTcp) { "tcp:127.0.0.1:$($env:QEMU_MONITOR_PORT)" } else { "unix:$env:MONITOR_SOCK" }
+    "unix:$env:MONITOR_SOCK"
 }
 
 function Get-VmMac {
@@ -156,21 +151,15 @@ function script:Get-QemuPids {
         }
     }
     if ($pids.Count -gt 0) { return $pids }
-    # fallback: scan processes whose command line mentions qemu + VM name
+    # fallback: scan /proc for qemu processes matching VM name
     try {
-        if ($script:IsWin) {
-            $procs = Get-CimInstance Win32_Process -Filter "Name LIKE 'qemu%'" -ErrorAction Stop |
-                Where-Object { $_.CommandLine -match 'qemu' -and $_.CommandLine -match [regex]::Escape($VM_NAME) }
-            $pids += @($procs | ForEach-Object { [int]$_.ProcessId })
-        } else {
-            foreach ($procDir in (Get-ChildItem '/proc' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' })) {
-                $cmdFile = Join-Path $procDir.FullName 'cmdline'
-                if (-not (Test-Path -LiteralPath $cmdFile)) { continue }
-                $bytes = [System.IO.File]::ReadAllBytes($cmdFile)
-                if ($bytes.Length -eq 0) { continue }
-                $cmd = [System.Text.Encoding]::UTF8.GetString(($bytes | ForEach-Object { if ($_ -eq 0) { 32 } else { $_ } }))
-                if ($cmd -match 'qemu' -and $cmd -match [regex]::Escape($VM_NAME)) { $pids += [int]$procDir.Name }
-            }
+        foreach ($procDir in (Get-ChildItem '/proc' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' })) {
+            $cmdFile = Join-Path $procDir.FullName 'cmdline'
+            if (-not (Test-Path -LiteralPath $cmdFile)) { continue }
+            $bytes = [System.IO.File]::ReadAllBytes($cmdFile)
+            if ($bytes.Length -eq 0) { continue }
+            $cmd = [System.Text.Encoding]::UTF8.GetString(($bytes | ForEach-Object { if ($_ -eq 0) { 32 } else { $_ } }))
+            if ($cmd -match 'qemu' -and $cmd -match [regex]::Escape($VM_NAME)) { $pids += [int]$procDir.Name }
         }
     } catch { }
     return @($pids | Select-Object -Unique)
@@ -211,24 +200,16 @@ function Invoke-AdminSsh {
     if ($QuickTimeout) { $sshArgs += @('-o', 'ConnectTimeout=3') }
     if ($Quiet)        { $sshArgs += @('-o', 'BatchMode=yes') }
 
-    if ($env:NETWORK_MODE -eq 'user') {
-        $sshArgs += @('-p', $HOST_SSH_FORWARD_PORT)
-        $sshArgs += "$($env:ADMIN_USER)@127.0.0.1"
-    } else {
-        $sshArgs += "$($env:ADMIN_USER)@$env:VM_IP"
-    }
+    $sshArgs += "$($env:ADMIN_USER)@$env:VM_IP"
     $sshArgs += $Command
     if ($Quiet) { & ssh @sshArgs 2>$null } else { & ssh @sshArgs }
     return $LASTEXITCODE
 }
 
-# Invoke-AdminSshWithFallback: direct IP first, then host-forward (bridge mode).
+# Invoke-AdminSshWithFallback: direct IP first, then host-forward via DNAT.
 function Invoke-AdminSshWithFallback {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Command)
-    if ($env:NETWORK_MODE -eq 'user') {
-        return (Invoke-AdminSsh -Command $Command)
-    }
     $code = Invoke-AdminSsh -Command $Command -QuickTimeout
     if ($code -eq 0) { return 0 }
     $sshArgs = @()

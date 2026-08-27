@@ -27,7 +27,7 @@ function Show-Usage {
 function Test-AgeInstalled {
     $age = Get-Command age -ErrorAction SilentlyContinue
     if (-not $age) {
-        Write-Error "age not found. Install: https://github.com/FiloSottile/age`n  winget install FiloSottile.age  (Windows)`n  apt install age / brew install age  (Linux/macOS)"
+        Write-Error "age not found. Install: https://github.com/FiloSottile/age`n  apt install age / brew install age"
     }
 }
 
@@ -81,11 +81,7 @@ function Sync-Secrets {
     $scpArgs = @()
     $scpArgs += Get-SshCommonArgs
     $scpArgs += Get-KeyArgs
-    $scpArgs += @($SECRETS_PLAIN, "$($env:ADMIN_USER)@127.0.0.1:${VM_SECRETS}")
-
-    if ($env:NETWORK_MODE -eq 'user') {
-        $scpArgs = @('-P', $HOST_SSH_FORWARD_PORT) + $scpArgs
-    }
+    $scpArgs += @($SECRETS_PLAIN, "$($env:ADMIN_USER)@$($env:VM_IP):${VM_SECRETS}")
     & scp @scpArgs
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to copy secrets to VM" }
 

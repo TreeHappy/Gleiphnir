@@ -4,7 +4,7 @@ See `README.md` for user-facing docs. This file is for contributors.
 
 ## Components
 
-- **QEMU/KVM** (Linux) or **QEMU/WHPX-TCG** (Windows): runs an Ubuntu 26.04 cloud image with two virtio drives (system overlay + data disk) and a seed ISO for cloud-init. On Linux hosts, TAP (`tap-gleiphnir`) is enslaved to a private bridge (`br-gleiphnir` 192.168.100.0/24) and host DNAT (`iptables -t nat PREROUTING :2222 → VM:22`) preserves source IPs so **ufw inside the VM** can filter them. On Windows hosts, only QEMU user-mode NAT is used — Gleiphnir never modifies host networking or firewall.
+- **QEMU/KVM**: runs an Ubuntu 26.04 cloud image with two virtio drives (system overlay + data disk) and a seed ISO for cloud-init. TAP (`tap-gleiphnir`) is enslaved to a private bridge (`br-gleiphnir` 192.168.100.0/24) and host DNAT (`iptables -t nat PREROUTING :2233 → VM:22`) preserves source IPs so **ufw inside the VM** can filter them.
 
 - **Host scripting**: all `vm/scripts/*.ps1` (PowerShell 7+), sharing `lib.ps1`. Orchestration via **mise tasks** in the root `mise.toml` (the old Taskfile.yml was removed). `config/sandbox.env` is loaded through mise `[env] _.file` *and* parsed by `lib.ps1`.
 
@@ -89,14 +89,13 @@ Legacy `sandbox-*.yaml` specs have been removed in favor of nested `fenrir`/`gle
 
 Host tasks: `gleiphnir tools list` → `mise run tools:list` etc. See `docs/commands/fenrir-tools.md` and `docs/commands/gleiphnir-tools.md`.
 
-## Networking modes
+## Networking
 
-- `bridge` (default, Linux hosts): private isolated bridge + DNAT. VM static `192.168.100.10/24` via cloud-init `network-config.bridge.yaml`. Works on wifi; if `PHYS_IF` is set the script enslaves it for a true LAN bridge.
-- `user` (default on native Windows): QEMU `-netdev user,hostfwd=tcp::2222-:22`. Zero host changes. The VM sees `10.0.2.x` sources, so per-IP guest filtering is meaningless here — use bridge mode (Linux) when you need IP allow/deny semantics.
+- `bridge` (Linux-only): private isolated bridge + DNAT. VM static `192.168.100.10/24` via cloud-init `network-config.bridge.yaml`. Works on wifi; if `PHYS_IF` is set the script enslaves it for a true LAN bridge.
 
 ## Data flow
 
-1. `gleiphnir up` (or `mise run up`) → `deps.ps1` → `download-image.ps1` → `prepare-vm.ps1` (overlay + data qcow2 + templated user-data → seed.iso via cloud-localds/genisoimage/pycdlib) → network-up (Linux bridge) → `start-vm.ps1` (`qemu-system-x86_64 … -daemonize` on POSIX; `Start-Process` detached on Windows; monitor = unix socket on Linux / TCP loopback on Windows).
+1. `gleiphnir up` (or `mise run up`) → `deps.ps1` → `download-image.ps1` → `prepare-vm.ps1` (overlay + data qcow2 + templated user-data → seed.iso via cloud-localds/genisoimage/pycdlib) → network-up (bridge) → `start-vm.ps1` (`qemu-system-x86_64 … -daemonize`; monitor = `unix:qemu-monitor.sock`).
 2. VM boots, cloud-init applies ufw posture, mounts `/srv/sandbox`, builds the image (baking `fenrir`/`gleiphnir` + `gdu`/`yazi`), warms `sandbox-mise`.
 3. `gleiphnir user add USER=alice` (or `mise run user:add USER=alice`) → `manage-user.ps1` SSHes as admin, runs `sandbox-user add` (also exposed as `fenrir user add` in-container).
 4. `ssh alice@192.168.100.10` → shell = `sandbox-shell` → `podman run` → entrypoint → **pwsh** (AstroNvim/atuin/`fen`+`gle` carapace ready; `bash` still available). Inside: `fen tools volumes` → `gdu`, `fen browse` → `yazi`.
