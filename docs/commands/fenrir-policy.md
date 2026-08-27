@@ -1,45 +1,53 @@
-# `fenrir policy` — egress/ingress allowlists (sbx parity)
+# `fenrir policy` — egress/ingress allowlists (sbx parity) — yolo read-only
 
-**Spec:** `container/files/carapace/specs/fenrir.yaml:311` `policy` (`sandbox-policy`)
-**Binary:** `container/files/fenrir:278` `sandbox-policy`
+> **Yolo: inside container only `ls|check` allowed.** `init|allow|deny|rm|reset|preset` denied `container/files/fenrir:278 deny_inside` — use `gle policy` on host (`vm/files/carapace/specs/gleiphnir.yaml:136`). AI yolo must not mutate host firewall/`/etc/sandbox/proxy-allowlist.txt:11` or `ufw`.
+
+**Spec (yolo):** `container/files/carapace/specs/fenrir.yaml:311` `policy ls|check` only (full spec on host `vm/files/carapace/specs/gleiphnir.yaml:136`)
+**Binary:** `container/files/fenrir:278` `sandbox-policy` read path `sandbox-policy:243 ls` `401 check` (`domain_matches:130`)
 
 ## Synopsis
 
 ```
-fenrir policy init [balanced|open|locked]
+# yolo inside (allowed)
 fenrir policy ls [--wide] [--json] [--sandbox NAME]
-fenrir policy allow network <host|**|CIDR> [--port PORT] [--sandbox NAME]
-fenrir policy deny network <host|CIDR> [--port PORT] [--sandbox NAME]
-fenrir policy rm network --resource <host> [--sandbox NAME]
 fenrir policy check network <host|url> [--sandbox NAME]
-fenrir policy reset [--force]
-fenrir policy preset list|apply <preset>|diff
+
+# denied yolo — use host (gle)
+gle policy init [balanced|open|locked]          # fen policy init denied
+gle policy allow network <host|**|CIDR> [--port PORT] [--sandbox NAME]
+gle policy deny network <host|CIDR> [--port PORT] [--sandbox NAME]
+gle policy rm network --resource <host> [--sandbox NAME]
+gle policy reset [--force]
+gle policy preset list|apply <preset>|diff
 ```
 
 ## Description
 
-Network policy like `sbx policy`. Domains/wildcards (`*.host`, `**`) via proxy allowlist (`/etc/sandbox/proxy-allowlist.txt`), CIDR/IP via `ufw`. Supports `--sandbox NAME` per-sandbox overrides. `balanced` preset covers npm/pypi/crates/go/nuget/maven/apt/mise/docker, github/ghcr, vscode, exa.ai/api.exa.ai.
+Network policy like `sbx policy` — yolo container **read-only**. Host `gle policy` owns all mutating ops. `fen` inside must not `allow/deny` via `sync_proxy_allowlist:165` or `ufw allow out:317`. Domains/wildcards (`*.host`, `**`) via proxy allowlist (`/etc/sandbox/proxy-allowlist.txt:11`), CIDR/IP via `ufw`. Supports `--sandbox NAME` per-sandbox overrides. `balanced` preset covers npm/pypi/crates/go/nuget/maven/apt/mise/docker, github/ghcr, vscode, exa.ai/api.exa.ai.
 
-| Subcommand | Description | Flags |
-|---|---|---|
-| `fenrir policy init [balanced|open|locked]` | Init preset (prompts if tty) | — |
-| `fenrir policy ls` | List rules | `--wide`, `--json`, `--sandbox` |
-| `fenrir policy allow network <host|**|CIDR>` | Allow host/wildcard/CIDR | `--port`, `--sandbox` |
-| `fenrir policy deny network <host|CIDR>` | Deny host/CIDR (deny wins) | `--port`, `--sandbox` |
-| `fenrir policy rm network --resource <host>` | Remove rule | `--resource`, `--id`, `--sandbox` |
-| `fenrir policy check network <host|url>` | Test allowed | `--sandbox` |
-| `fenrir policy reset` | Wipe + re-init balanced | `--force` |
-| `fenrir policy preset list|apply|diff` | Presets | — |
+| Subcommand | Description | Flags | Yolo |
+|---|---|---|---|
+| `fenrir policy ls` | List rules (read-only) | `--wide`, `--json`, `--sandbox` | **allowed** |
+| `fenrir policy check network <host|url>` | Test allowed (read-only) | `--sandbox` | **allowed** |
+| `fenrir policy init [balanced|open|locked]` | Init preset | — | **denied yolo → `gle policy init`** |
+| `fenrir policy allow network <host|**|CIDR>` | Allow host/wildcard/CIDR | `--port`, `--sandbox` | **denied yolo → `gle policy allow`** |
+| `fenrir policy deny network <host|CIDR>` | Deny host/CIDR (deny wins) | `--port`, `--sandbox` | **denied yolo → `gle policy deny`** |
+| `fenrir policy rm network --resource <host>` | Remove rule | `--resource`, `--id`, `--sandbox` | **denied yolo → `gle policy rm`** |
+| `fenrir policy reset` | Wipe + re-init balanced | `--force` | **denied yolo → `gle policy reset`** |
+| `fenrir policy preset list|apply|diff` | Presets | — | **denied yolo → `gle policy preset`** |
 
-Host equivalent is `gle policy` (`vm/files/carapace/specs/gleiphnir.yaml:106` → `mise run policy:*`).
+Host full is `gle policy` (`vm/files/carapace/specs/gleiphnir.yaml:106` → `mise run policy:*` → `ssh admin → sudo sandbox-policy`).
 
 ## Examples
 
 ```bash
+# yolo inside (allowed)
 fenrir policy ls --wide
-fenrir policy allow network registry.npmjs.org
-fenrir policy allow network "*.exa.ai"
 fenrir policy check network https://api.exa.ai/search
+
+# host (privileged)
+gle policy allow network registry.npmjs.org
+gle policy allow network "*.exa.ai"
 ```
 
 ## See Also

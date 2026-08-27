@@ -1,42 +1,33 @@
-# `fenrir secrets` — sandbox secrets (admin)
+# `fenrir secrets` — DENIED yolo inside (host `gle secrets` only)
 
-**Spec:** `container/files/carapace/specs/fenrir.yaml:84` `secrets` (admin only, `sandbox-secrets`)
-**Binary:** `container/files/fenrir:263` `sandbox-secrets`
+> **Yolo: `fen secrets` denied inside container** `container/files/fenrir:263 deny_inside` — secrets are injected as env vars `vm/guest/bin/sandbox-shell:123` `COMMON_ARGS -e` from `/var/lib/sandbox/secrets.env:7` `chmod 600`. Use `gle secrets` on host (`vm/files/carapace/specs/gleiphnir.yaml:470` → `mise run secrets:*` `vm/scripts/secrets.ps1:1` `age -r` `scp`) or `ssh admin → sudo sandbox-secrets:1`. Inside container `env | grep SECRET` already, no `fen secrets` needed.
 
-## Synopsis
+**Spec (yolo):** removed from `container/files/carapace/specs/fenrir.yaml:84` (was `secrets`); host keeps `vm/files/carapace/specs/gleiphnir.yaml:470`.
+**Binary:** `container/files/fenrir:263 deny_inside`, host `vm/guest/bin/sandbox-secrets:1` privileged `require_root:30`.
+
+## Synopsis (host)
 
 ```
-fenrir secrets list
-fenrir secrets set KEY=VALUE
-fenrir secrets set KEY < file
-fenrir secrets remove <key>
-fenrir secrets export
-fenrir secrets rotate <key>
+gle secrets init|encrypt|decrypt|sync|list|status  # host
+sudo sandbox-secrets list|set|remove|export|rotate  # VM admin
 ```
 
-## Description
+## Description (host)
 
-Manage sandbox secrets stored in `/var/lib/sandbox/secrets.env` (admin-only). `list` shows key names, `set` adds/updates, `remove` deletes, `export` dumps `KEY=VALUE`, `rotate` generates a random 32-char value.
+Host `gle secrets` manages `config/secrets.env` `age` encrypted `*.enc` `.gitignore:20` and syncs to `/var/lib/sandbox/secrets.env` `0600` via `scp` `secrets.ps1:89` `HOST_SSH_FORWARD_PORT=2233` `config/sandbox.env:50`. Inside container secrets appear as `env` `sandbox-shell:130`, not via `fen`.
 
-| Subcommand | Description |
-|---|---|
-| `fenrir secrets list` | Show key names (not values) |
-| `fenrir secrets set KEY=VALUE` | Add/update (or `KEY < file`) |
-| `fenrir secrets remove <key>` | Delete |
-| `fenrir secrets export` | Dump all secrets as `KEY=VALUE` (admin only) |
-| `fenrir secrets rotate <key>` | Generate random 32-char |
-
-## Examples
+## Examples (host, not yolo)
 
 ```bash
-fenrir secrets list
-echo -n "s3cr3t" | fenrir secrets set MY_TOKEN
-fenrir secrets set API_KEY=abc123
-fenrir secrets export | grep MY_TOKEN
-fenrir secrets rotate MY_TOKEN
+# host
+gle secrets list
+gle secrets sync  # scp → VM
+ssh admin@192.168.100.10 "sudo sandbox-secrets list"
+ssh alice@192.168.100.10 env | grep MY_TOKEN  # inside sees env, not fen
 ```
 
 ## See Also
 
 - Host secrets: `docs/commands/gleiphnir-secrets.md` (`gle secrets` → `age` encryption)
 - Guest impl: `vm/guest/bin/sandbox-secrets:1`
+- Yolo: inside `fen secrets` denied `container/files/fenrir:263`

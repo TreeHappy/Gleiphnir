@@ -1,18 +1,24 @@
-# `fenrir firewall` — VM firewall (deprecated → policy)
+# `fenrir firewall` — DENIED yolo inside (deprecated → `gle policy`)
 
-**Spec:** `container/files/carapace/specs/fenrir.yaml:244` `firewall` (`sandbox-firewall`)
-**Binary:** `container/files/fenrir:275` `sandbox-firewall`
+> **Yolo: `fen firewall` denied inside** `container/files/fenrir:275 deny_inside` — `ufw` `vm/guest/bin/sandbox-firewall:1` `require_root:56` `allow from IP to 22` `ufw default deny incoming` `user-data.yaml.tpl:261` are host-only. AI must not bypass `br-gleiphnir` `vm/scripts/network-up.ps1:26` or `HOST_SSH_FORWARD_PORT=2233`. Use `gle fw` / `gle policy` on host (`vm/files/carapace/specs/gleiphnir.yaml:104`).
 
-## Synopsis
+**Spec (yolo):** removed from `container/files/carapace/specs/fenrir.yaml:244`; host keeps `vm/files/carapace/specs/gleiphnir.yaml:104`.
+**Binary:** `container/files/fenrir:275 deny_inside`, host `vm/guest/bin/sandbox-firewall:1`.
+
+## Synopsis (denied yolo, host only)
 
 ```
-fenrir firewall allow <ip>            # Allow IP/CIDR → tcp/22 (compat)
-fenrir firewall deny <ip>             # Deny IP
-fenrir firewall remove <ip>           # aliases: delete, unallow, undeny
-fenrir firewall enforce               # alias: lockdown — drop bootstrap any→:22
-fenrir firewall list                  # aliases: show, status — ufw status numbered
-fenrir firewall ingress allow <ip> [--port PORT] [--proto tcp|udp]
-fenrir firewall egress allow <dst> [--port PORT] [--proto tcp|udp]
+# inside fen firewall → denied
+fen firewall allow 203.0.113.42  # -> error: denied inside, use gle
+
+# host (privileged)
+gle firewall allow <ip>            # or gle fw allow IP=...
+gle firewall deny <ip>
+gle firewall remove <ip>
+gle firewall enforce
+gle firewall list
+gle firewall ingress allow <ip> [--port PORT]
+gle firewall egress allow <dst> [--port PORT]
 ```
 
 ## Description
